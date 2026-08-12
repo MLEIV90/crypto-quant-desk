@@ -13,3 +13,4 @@ data/cache/*.parquet
 
 .env
 .DS_Store
+.ipynb_checkpoints/
