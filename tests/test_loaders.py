@@ -1,0 +1,135 @@
+"""Tests offline (sin red) para data/loaders.py."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from data import loaders
+
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
+class _FakeResponse:
+    """Sustituto mínimo de requests.Response para mockear `_http_get_with_retry`."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+# --------------------------------------------------------------------------
+# _standardize
+# --------------------------------------------------------------------------
+
+
+def test_standardize_returns_expected_columns_and_utc_index() -> None:
+    idx = pd.to_datetime(["2021-01-02", "2021-01-01", "2021-01-01", "2021-01-03"])
+    raw = pd.DataFrame(
+        {
+            "open": [2.0, 1.0, 1.5, 3.0],
+            "high": [2.0, 1.0, 1.5, 3.0],
+            "low": [2.0, 1.0, 1.5, 3.0],
+            "close": [2.0, 1.0, 1.5, 3.0],
+            "volume": [20.0, 10.0, 15.0, 30.0],
+        },
+        index=idx,
+    )
+
+    out = loaders._standardize(raw, interval="1d", source="test")
+
+    assert list(out.columns) == loaders.STANDARD_COLUMNS
+    assert isinstance(out.index, pd.DatetimeIndex)
+    assert out.index.tz is not None
+    assert str(out.index.tz) == "UTC"
+    assert out.index.is_monotonic_increasing
+    assert not out.index.duplicated().any()
+    # La fila duplicada en 2021-01-01 debe resolverse quedándose con la última (close=1.5).
+    assert out.loc["2021-01-01", "close"].item() == pytest.approx(1.5)
+    assert out.dtypes.eq(float).all()
+
+
+def test_standardize_raises_on_missing_columns() -> None:
+    idx = pd.date_range("2021-01-01", periods=3, freq="D", tz="UTC")
+    raw = pd.DataFrame({"close": [1.0, 2.0, 3.0]}, index=idx)
+
+    with pytest.raises(ValueError):
+        loaders._standardize(raw, interval="1d", source="test")
+
+
+# --------------------------------------------------------------------------
+# CoinMetrics (fixture offline)
+# --------------------------------------------------------------------------
+
+
+def test_load_coinmetrics_uses_priceusd_as_close_and_fills_ohlc(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture_text = (FIXTURES_DIR / "coinmetrics_btc_sample.csv").read_text(encoding="utf-8")
+
+    def fake_http_get_with_retry(url: str, params: dict) -> _FakeResponse:
+        assert "btc.csv" in url
+        return _FakeResponse(fixture_text)
+
+    monkeypatch.setattr(loaders, "_http_get_with_retry", fake_http_get_with_retry)
+
+    df = loaders._load_coinmetrics("btc", start="2020-01-01", end="2020-01-05")
+
+    assert list(df.columns) == loaders.STANDARD_COLUMNS
+    assert isinstance(df.index, pd.DatetimeIndex)
+    assert str(df.index.tz) == "UTC"
+    assert len(df) == 5
+    # Sin OHLC real: open/high/low/close deben ser todos iguales al PriceUSD.
+    assert (df["open"] == df["close"]).all()
+    assert (df["high"] == df["close"]).all()
+    assert (df["low"] == df["close"]).all()
+    assert df["close"].iloc[0] == pytest.approx(7200.5)
+    assert df["volume"].isna().all()
+
+
+# --------------------------------------------------------------------------
+# get_prices: fallback entre fuentes
+# --------------------------------------------------------------------------
+
+
+def test_get_prices_falls_back_when_primary_source_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    idx = pd.date_range("2021-01-01", periods=3, freq="D", tz="UTC")
+    fallback_df = pd.DataFrame(
+        {
+            "open": [1.0, 2.0, 3.0],
+            "high": [1.0, 2.0, 3.0],
+            "low": [1.0, 2.0, 3.0],
+            "close": [1.0, 2.0, 3.0],
+            "volume": [np.nan, np.nan, np.nan],
+        },
+        index=idx,
+    )
+
+    calls: list[str] = []
+
+    def fake_load_from_source(asset: str, source: str, interval: str, start: str, end: str) -> pd.DataFrame:
+        calls.append(source)
+        if source == "binance":
+            raise ConnectionError("simulación de fallo de red")
+        if source == "coinmetrics":
+            return fallback_df
+        raise AssertionError(f"No debería intentarse la fuente '{source}' en este test")
+
+    monkeypatch.setattr(loaders, "_load_from_source", fake_load_from_source)
+
+    out = loaders.get_prices("BTC", source="binance", start="2021-01-01", end="2021-01-03", use_cache=False)
+
+    assert calls[0] == "binance"
+    assert "coinmetrics" in calls
+    assert list(out.columns) == loaders.STANDARD_COLUMNS
+    assert len(out) == 3
+
+
+def test_get_prices_raises_when_all_sources_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_load_from_source(asset: str, source: str, interval: str, start: str, end: str) -> pd.DataFrame:
+        raise ConnectionError(f"fallo simulado en {source}")
+
+    monkeypatch.setattr(loaders, "_load_from_source", fake_load_from_source)
+
+    with pytest.raises(RuntimeError):
+        loaders.get_prices("BTC", source="binance", start="2021-01-01", end="2021-01-03", use_cache=False)
