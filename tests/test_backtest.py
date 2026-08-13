@@ -6,8 +6,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from backtest.engine import compare_to_buy_and_hold, run_backtest
+from backtest.engine import backtest_from_prices, compare_to_buy_and_hold, run_backtest
 from metrics.risk_measures import equity_curve, sharpe_ratio
+from signals.returns import simple_returns
 
 
 def _synthetic_returns(n: int = 500, seed: int = 0) -> pd.Series:
@@ -38,6 +39,52 @@ def test_always_long_with_zero_cost_matches_asset_returns_after_warmup_day() -> 
 
     expected_equity = equity_curve(expected_returns)
     pd.testing.assert_series_equal(result.equity_curve, expected_equity, check_names=False)
+
+
+def test_run_backtest_accepts_scalar_positions() -> None:
+    # positions=1 (escalar, no pd.Series) debe comportarse igual que pasar
+    # una serie constante de 1.0 en todas las fechas de asset_returns.
+    asset_returns = _synthetic_returns()
+
+    scalar_result = run_backtest(asset_returns, positions=1, cost_bps=0.0)
+    series_result = run_backtest(asset_returns, pd.Series(1.0, index=asset_returns.index), cost_bps=0.0)
+
+    pd.testing.assert_series_equal(scalar_result.returns, series_result.returns)
+    assert scalar_result.metrics == series_result.metrics
+
+
+# --------------------------------------------------------------------------
+# backtest_from_prices: contrato de retornos SIMPLES
+# --------------------------------------------------------------------------
+
+
+def test_backtest_from_prices_matches_run_backtest_with_simple_returns() -> None:
+    idx = pd.date_range("2020-01-01", periods=200, freq="D")
+    rng = np.random.default_rng(2)
+    prices = pd.Series(100.0 * np.exp(np.cumsum(rng.normal(0.0005, 0.02, 200))), index=idx)
+
+    result_from_prices = backtest_from_prices(prices, positions=1, cost_bps=10.0)
+
+    manual_returns = simple_returns(prices)
+    result_manual = run_backtest(manual_returns, positions=1, cost_bps=10.0)
+
+    pd.testing.assert_series_equal(result_from_prices.returns, result_manual.returns)
+    assert result_from_prices.metrics == result_manual.metrics
+
+
+def test_run_backtest_warns_when_returns_look_logarithmic(caplog: pytest.LogCaptureFixture) -> None:
+    # Un log-retorno de una caída fuerte (< -100%) hace que (1 + r) sea
+    # negativo, imposible para un retorno SIMPLE válido (el precio no puede
+    # caer más del 100%). run_backtest debe loguear un warning claro, NO abortar.
+    idx = pd.date_range("2020-01-01", periods=5, freq="D")
+    fake_log_returns = pd.Series([0.01, -1.5, 0.02, -0.01, 0.03], index=idx)
+    positions = pd.Series(1.0, index=idx)
+
+    with caplog.at_level("WARNING", logger="backtest.engine"):
+        result = run_backtest(fake_log_returns, positions, cost_bps=0.0)
+
+    assert any("LOGARÍTMICOS" in record.message for record in caplog.records)
+    assert len(result.returns) == 5  # no abortó
 
 
 def test_compare_to_buy_and_hold_matches_when_strategy_is_buy_and_hold() -> None:

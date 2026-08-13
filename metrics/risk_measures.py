@@ -2,8 +2,9 @@
 
 Convención del proyecto: los retornos de entrada están en escala DECIMAL
 (0.01 == 1%) y se asume frecuencia diaria por defecto
-(`periods_per_year=252`, ver config.py). El estilo sigue al repo `momentum`
-de MLEIV90, adaptado de mensual a diario.
+(`periods_per_year=config.PERIODS_PER_YEAR`, 365 para cripto — opera todos
+los días del año, no solo días hábiles como las acciones). El estilo sigue
+al repo `momentum` de MLEIV90, adaptado de mensual a diario.
 
 Las medidas de riesgo de cola (VaR, Expected Shortfall) y el máximo drawdown
 tienen convenciones de signo explícitas documentadas en cada función — no son

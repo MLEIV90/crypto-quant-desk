@@ -3,7 +3,8 @@
 Convención del proyecto: `returns` es siempre una serie de retornos en escala
 DECIMAL (0.01 == 1%), frecuencia diaria, consistente con
 `signals.returns.log_returns`. La anualización usa `config.PERIODS_PER_YEAR`
-(252) salvo que se indique lo contrario.
+(365 para cripto, no 252 — cripto opera todos los días del año) salvo que se
+indique lo contrario.
 
 Convención de estabilidad numérica (siguiendo el estilo del repo `momentum`
 del autor, `modules/garch_volatility.py`, adaptado de mensual a diario):
@@ -233,12 +234,13 @@ def forecast_volatility(
 
 
 def volatility_regime(
-    cond_vol: pd.Series, lookback: int = 252, low: float = 0.33, high: float = 0.66
+    cond_vol: pd.Series, lookback: int = PERIODS_PER_YEAR, low: float = 0.33, high: float = 0.66
 ) -> pd.Series:
     """Clasifica cada día de `cond_vol` (volatilidad condicional anualizada,
     ver `conditional_volatility`) en un régimen relativo a su propia
     historia reciente, según el percentil de la vol condicional dentro de
-    una ventana móvil de `lookback` observaciones:
+    una ventana móvil de `lookback` observaciones (por defecto, un año de
+    trading — `config.PERIODS_PER_YEAR`, 365 para cripto):
         - "calma": percentil <= `low`
         - "tension": percentil >= `high`
         - "normal": en el medio

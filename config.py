@@ -5,7 +5,9 @@ Convenciones globales del proyecto:
       porcentaje ni en basis points, salvo que el nombre de la variable lo
       indique explícitamente (p. ej. TRANSACTION_COST_BPS).
     - La frecuencia de trabajo por defecto es DIARIA, por lo que
-      PERIODS_PER_YEAR = 252 (días hábiles) se usa para anualizar métricas.
+      PERIODS_PER_YEAR se usa para anualizar métricas. A diferencia de las
+      acciones (252 días hábiles), el mercado cripto opera los 365 días del
+      año sin feriados ni fines de semana, así que PERIODS_PER_YEAR = 365.
     - Todas las series temporales de precios usan índice datetime en UTC
       (tz-aware). No se asume timezone local en ningún punto del pipeline.
     - Los paths se resuelven siempre vía pathlib a partir de BASE_DIR, nunca
@@ -50,7 +52,9 @@ UNIVERSE: dict[str, dict[str, str]] = {
 # Parámetros de retornos y trading
 # --------------------------------------------------------------------------
 
-PERIODS_PER_YEAR: int = 252
+# 365, no 252: cripto opera todos los días del año, no solo días hábiles
+# bursátiles (esa es la convención de acciones, no la de este proyecto).
+PERIODS_PER_YEAR: int = 365
 DEFAULT_INTERVAL: str = "1d"
 RAW_START_DATE: str = "2017-01-01"
 

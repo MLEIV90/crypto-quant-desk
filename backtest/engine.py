@@ -1,5 +1,17 @@
 """Backtester vectorizado con costos de transacción.
 
+CONTRATO DE RETORNOS — LÉASE ANTES DE USAR ESTE MÓDULO: `asset_returns` en
+`run_backtest` DEBE ser retornos SIMPLES (aritméticos: r_t = P_t/P_{t-1} - 1,
+ver `signals.returns.simple_returns`), NUNCA retornos LOGARÍTMICOS
+(`signals.returns.log_returns`). La equity curve compone multiplicativamente
+vía (1 + r) (`metrics.risk_measures.equity_curve`), y esa composición solo
+es matemáticamente correcta para retornos simples — componer log-retornos
+con (1 + r) da una equity curve y unas métricas NUMÉRICAMENTE INCORRECTAS,
+en silencio (no lanza ningún error, el número simplemente queda mal). Si
+partís de precios en vez de retornos ya calculados, usá
+`backtest_from_prices` en vez de `run_backtest` directamente: calcula los
+retornos simples por vos y elimina esta clase de error de raíz.
+
 REGLA ANTI-LOOKAHEAD (léase antes de usar este módulo): la posición que
 llega a `run_backtest` en `positions[t]` se interpreta como la decisión
 tomada con información disponible hasta el CIERRE del día t, y por lo tanto
@@ -16,9 +28,10 @@ Este módulo NO reimplementa métricas de riesgo/performance: reutiliza
 curve, retorno/vol anualizados) tal cual, y solo agrega las métricas propias
 del backtest (turnover, n° de trades, exposición, hit rate).
 
-Convención del proyecto: `asset_returns`/`positions.returns` en escala
-DECIMAL, frecuencia diaria, `PERIODS_PER_YEAR=252` por defecto (ver
-config.py). `cost_bps` sigue `config.TRANSACTION_COST_BPS` (en basis points,
+Convención del proyecto: `asset_returns`/`positions`/`returns` en escala
+DECIMAL, frecuencia diaria, `config.PERIODS_PER_YEAR` por defecto (365 para
+cripto: opera todos los días del año, no solo días hábiles como las
+acciones). `cost_bps` sigue `config.TRANSACTION_COST_BPS` (en basis points,
 1 bp = 0.01% = 0.0001 decimal) aplicado sobre el turnover en la convención
 `config.TURNOVER_CONVENTION` ("one_way": el turnover de un rebalanceo cuenta
 un solo lado, no ida+vuelta).
@@ -42,6 +55,7 @@ from metrics.risk_measures import (
     sharpe_ratio,
     sortino_ratio,
 )
+from signals.returns import simple_returns
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +92,7 @@ class BacktestResult:
 
 def run_backtest(
     asset_returns: pd.Series,
-    positions: pd.Series,
+    positions: pd.Series | float,
     cost_bps: float | None = None,
     periods_per_year: int = PERIODS_PER_YEAR,
 ) -> BacktestResult:
@@ -87,19 +101,26 @@ def run_backtest(
     Parámetros
     ----------
     asset_returns:
-        Retornos DECIMALES del activo, indexados por fecha.
+        Retornos SIMPLES (aritméticos) DECIMALES del activo, indexados por
+        fecha — NUNCA logarítmicos (ver CONTRATO DE RETORNOS en el docstring
+        del módulo). Si partís de precios, usá `backtest_from_prices` en vez
+        de armar `asset_returns` a mano.
     positions:
         Posición objetivo en [-1, 1] (o {-1, 0, 1} para long/flat/short),
-        indexada por fecha, alineada (por índice) con `asset_returns`.
-        Se interpreta como la decisión tomada con información hasta el
-        cierre de cada fecha (ver regla anti-lookahead del docstring del
-        módulo) — `run_backtest` es responsable de aplicar el desfase, NO
-        hay que pre-desplazar `positions` antes de llamar a esta función.
+        indexada por fecha, alineada (por índice) con `asset_returns`. Se
+        interpreta como la decisión tomada con información hasta el cierre
+        de cada fecha (ver regla anti-lookahead del docstring del módulo) —
+        `run_backtest` es responsable de aplicar el desfase, NO hay que
+        pre-desplazar `positions` antes de llamar a esta función. También
+        acepta un escalar (p. ej. `positions=1` para buy & hold puro), que
+        se interpreta como una posición constante en todas las fechas de
+        `asset_returns`.
     cost_bps:
         Costo de transacción en basis points por unidad de turnover
         one-way. Si es None, se usa `config.TRANSACTION_COST_BPS`.
     periods_per_year:
-        Para anualizar métricas (252 por defecto).
+        Para anualizar métricas (`config.PERIODS_PER_YEAR` por defecto, 365
+        para cripto).
 
     Lógica (por día t, ya con `posicion_efectiva = positions.shift(1)`):
         turnover_t = |posicion_efectiva_t - posicion_efectiva_{t-1}|
@@ -117,6 +138,9 @@ def run_backtest(
     if cost_bps is None:
         cost_bps = TRANSACTION_COST_BPS
 
+    if not isinstance(positions, pd.Series):
+        positions = pd.Series(float(positions), index=asset_returns.index)
+
     aligned = pd.concat(
         [asset_returns.rename("asset_return"), positions.rename("position")], axis=1
     ).dropna()
@@ -128,6 +152,22 @@ def run_backtest(
 
     asset_returns_aligned = aligned["asset_return"]
     positions_aligned = aligned["position"]
+
+    # Chequeo defensivo (no aborta): con retornos SIMPLES válidos,
+    # (1 + asset_returns) nunca puede ser <= 0 (el precio no puede caer más
+    # del 100%). Si aparece, es la señal típica de haber pasado retornos
+    # LOGARÍTMICOS por error (ver CONTRATO DE RETORNOS del módulo) — un
+    # log-retorno de una caída fuerte (p. ej. -120%) es perfectamente válido
+    # como log-retorno, pero rompe la convención de composición (1+r) de
+    # este backtester.
+    n_impossible = int((1.0 + asset_returns_aligned <= 0.0).sum())
+    if n_impossible > 0:
+        logger.warning(
+            "run_backtest: %d fecha(s) con (1 + asset_returns) <= 0, imposible con retornos "
+            "SIMPLES válidos. ¿Estás pasando retornos LOGARÍTMICOS por error? Usá "
+            "signals.returns.simple_returns o backtest_from_prices().",
+            n_impossible,
+        )
 
     # REGLA ANTI-LOOKAHEAD: la posición decidida en t recién es efectiva en t+1.
     position_effective = positions_aligned.shift(1).fillna(0.0)
@@ -164,6 +204,40 @@ def run_backtest(
     )
 
     return BacktestResult(equity_curve=equity, returns=strategy_returns, metrics=metrics)
+
+
+def backtest_from_prices(
+    prices: pd.Series,
+    positions: pd.Series | float,
+    cost_bps: float | None = None,
+    periods_per_year: int | None = None,
+) -> BacktestResult:
+    """Vía RECOMENDADA para correr un backtest a partir de PRECIOS (en vez de
+    retornos ya calculados a mano).
+
+    Calcula internamente los retornos SIMPLES con
+    `signals.returns.simple_returns` (nunca logarítmicos — ver CONTRATO DE
+    RETORNOS en el docstring del módulo) y llama a `run_backtest` con ellos.
+    Preferí esta función a `run_backtest` cada vez que partas de precios: es
+    la forma de no arriesgarte a pasarle por error una serie de
+    log-retornos, un error fácil de cometer (compila y corre igual) y difícil
+    de notar a simple vista (solo se nota en que las métricas quedan
+    sutilmente mal).
+
+    Parámetros
+    ----------
+    prices:
+        Precios de cierre (u otro precio consistente), indexados por fecha.
+    positions, cost_bps:
+        Igual que en `run_backtest`.
+    periods_per_year:
+        Igual que en `run_backtest`; si es None, se usa
+        `config.PERIODS_PER_YEAR`.
+    """
+    if periods_per_year is None:
+        periods_per_year = PERIODS_PER_YEAR
+    asset_returns = simple_returns(prices)
+    return run_backtest(asset_returns, positions, cost_bps=cost_bps, periods_per_year=periods_per_year)
 
 
 def compare_to_buy_and_hold(

@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from config import PERIODS_PER_YEAR
 from metrics.risk_measures import (
     annualized_return,
     annualized_volatility,
@@ -55,14 +56,18 @@ def test_calmar_ratio_is_inf_when_no_drawdown() -> None:
 
 
 def test_annualized_return_matches_compounding_formula() -> None:
-    r = pd.Series([0.001] * 252)
-    assert annualized_return(r, periods_per_year=252) == pytest.approx(1.001**252 - 1.0)
+    r = pd.Series([0.001] * PERIODS_PER_YEAR)
+    assert annualized_return(r, periods_per_year=PERIODS_PER_YEAR) == pytest.approx(
+        1.001**PERIODS_PER_YEAR - 1.0
+    )
 
 
 def test_annualized_volatility_scales_by_sqrt_periods_per_year() -> None:
-    r = pd.Series(np.random.default_rng(5).normal(0, 0.01, 252))
+    r = pd.Series(np.random.default_rng(5).normal(0, 0.01, PERIODS_PER_YEAR))
     vol_daily = r.std(ddof=1)
-    assert annualized_volatility(r, periods_per_year=252) == pytest.approx(vol_daily * np.sqrt(252))
+    assert annualized_volatility(r, periods_per_year=PERIODS_PER_YEAR) == pytest.approx(
+        vol_daily * np.sqrt(PERIODS_PER_YEAR)
+    )
 
 
 # --------------------------------------------------------------------------
