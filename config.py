@@ -23,9 +23,13 @@ from pathlib import Path
 BASE_DIR: Path = Path(__file__).resolve().parent
 DATA_DIR: Path = BASE_DIR / "data"
 CACHE_DIR: Path = DATA_DIR / "cache"
+# Snapshot local exportado por scripts/export_snapshot.py (fuente "store" de
+# data/loaders.py). Se comparte manualmente entre máquinas, no se versiona.
+SNAPSHOT_DIR: Path = DATA_DIR / "snapshot"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 # --------------------------------------------------------------------------
 # Universo de activos

@@ -88,6 +88,61 @@ def test_load_coinmetrics_uses_priceusd_as_close_and_fills_ohlc(monkeypatch: pyt
 
 
 # --------------------------------------------------------------------------
+# source="store" (snapshot local de scripts/export_snapshot.py)
+# --------------------------------------------------------------------------
+
+
+def _write_fake_snapshot(directory: Path, asset: str, interval: str = "1d") -> pd.DataFrame:
+    idx = pd.date_range("2020-01-01", periods=5, freq="D", tz="UTC")
+    df = pd.DataFrame(
+        {
+            "open": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "high": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "low": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "close": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "volume": [10.0, 20.0, 30.0, 40.0, 50.0],
+        },
+        index=idx,
+    )
+    df.index.name = "timestamp"
+    df.to_parquet(directory / f"{asset}_{interval}.parquet")
+    return df
+
+
+def test_load_store_raises_clear_error_when_snapshot_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+
+    with pytest.raises(FileNotFoundError, match="export_snapshot"):
+        loaders._load_store("BTC", "1d", "2020-01-01", "2020-01-05")
+
+
+def test_load_store_reads_local_snapshot_parquet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    _write_fake_snapshot(tmp_path, "BTC")
+
+    df = loaders._load_store("BTC", "1d", "2020-01-01", "2020-01-05")
+
+    assert list(df.columns) == loaders.STANDARD_COLUMNS
+    assert len(df) == 5
+    assert str(df.index.tz) == "UTC"
+    assert df["close"].iloc[-1] == pytest.approx(5.0)
+
+
+def test_get_prices_source_store_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    _write_fake_snapshot(tmp_path, "BTC")
+
+    out = loaders.get_prices("BTC", source="store", start="2020-01-01", end="2020-01-05", use_cache=False)
+
+    assert list(out.columns) == loaders.STANDARD_COLUMNS
+    assert len(out) == 5
+    assert out.index.tz is not None
+    assert out.index.is_monotonic_increasing
+
+
+# --------------------------------------------------------------------------
 # get_prices: fallback entre fuentes
 # --------------------------------------------------------------------------
 

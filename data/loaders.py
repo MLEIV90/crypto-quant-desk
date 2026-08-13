@@ -27,7 +27,15 @@ import numpy as np
 import pandas as pd
 import requests
 
-from config import CACHE_DIR, DEFAULT_INTERVAL, DEFAULT_SOURCE, FALLBACK_SOURCES, RAW_START_DATE, UNIVERSE
+from config import (
+    CACHE_DIR,
+    DEFAULT_INTERVAL,
+    DEFAULT_SOURCE,
+    FALLBACK_SOURCES,
+    RAW_START_DATE,
+    SNAPSHOT_DIR,
+    UNIVERSE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +91,10 @@ def get_prices(
     asset:
         Ticker interno definido en `config.UNIVERSE` (p. ej. "BTC").
     source:
-        Fuente primaria a intentar ("binance", "coinmetrics", "coingecko").
+        Fuente primaria a intentar ("binance", "coinmetrics", "coingecko", o
+        "store" para leer un snapshot local ya exportado por
+        `scripts/export_snapshot.py` desde `config.SNAPSHOT_DIR`, útil para
+        verificar el pipeline offline con un dataset ya compartido).
     interval:
         Intervalo de las velas (p. ej. "1d"). Ver `config.DEFAULT_INTERVAL`.
     start, end:
@@ -140,6 +151,11 @@ def get_prices(
 
 
 def _load_from_source(asset: str, source: str, interval: str, start: str, end: str) -> pd.DataFrame:
+    if source == "store":
+        # No usa config.UNIVERSE: el snapshot se nombra con el ticker interno
+        # directamente (ver scripts/export_snapshot.py), no con un símbolo de exchange.
+        return _load_store(asset, interval, start, end)
+
     symbols = UNIVERSE[asset]
     if source not in symbols:
         raise ValueError(f"Fuente '{source}' no está definida para '{asset}' en config.UNIVERSE")
@@ -298,6 +314,32 @@ def _load_coingecko(symbol: str, start: str, end: str) -> pd.DataFrame:
         index=close.index,
     )
     return out.sort_index()
+
+
+def _load_store(asset: str, interval: str, start: str, end: str) -> pd.DataFrame:
+    """Lee un snapshot local ya exportado por `scripts/export_snapshot.py`
+    (`config.SNAPSHOT_DIR/{asset}_{interval}.parquet`).
+
+    Pensado para verificar el pipeline offline con un dataset ya compartido,
+    sin depender de la disponibilidad de Binance en el entorno. Si el
+    archivo no existe, lanza un error claro indicando cómo generarlo.
+    """
+    path = SNAPSHOT_DIR / f"{asset}_{interval}.parquet"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"No existe el snapshot local '{path}'. Corré 'python scripts/export_snapshot.py' "
+            "para generarlo antes de usar source='store'."
+        )
+
+    df = pd.read_parquet(path)
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
+    else:
+        df.index = df.index.tz_convert("UTC")
+
+    start_ts = pd.Timestamp(start, tz="UTC")
+    end_ts = pd.Timestamp(end, tz="UTC")
+    return df.loc[(df.index >= start_ts) & (df.index <= end_ts)]
 
 
 def _load_csv(path: str | Path) -> pd.DataFrame:
