@@ -71,3 +71,32 @@ TURNOVER_CONVENTION: str = "one_way"
 
 DEFAULT_SOURCE: str = "binance"
 FALLBACK_SOURCES: list[str] = ["coinmetrics", "coingecko"]
+
+# --------------------------------------------------------------------------
+# Motor de señales / decisión (ver signals/engine.py)
+# --------------------------------------------------------------------------
+
+# Pesos de cada componente en el score compuesto. DEBEN sumar 1 (si se pasan
+# pesos custom a composite_score() que no sumen 1, se loguea un warning).
+SIGNAL_WEIGHTS: dict[str, float] = {"trend": 0.5, "momentum": 0.25, "mean_reversion": 0.25}
+
+# Zona muerta del score compuesto (en [-1,1]): por encima de
+# SCORE_THRESHOLD_LONG => LONG, por debajo de SCORE_THRESHOLD_SHORT => SHORT,
+# en el medio => FLAT (posición 0, señal demasiado débil/ambigua para operar).
+SCORE_THRESHOLD_LONG: float = 0.2
+SCORE_THRESHOLD_SHORT: float = -0.2
+
+# Vol targeting para el sizing de la posición: TARGET_VOL es la volatilidad
+# ANUAL objetivo del book (alta, 50%, acorde a la volatilidad típica de
+# cripto); MAX_LEVERAGE acota el apalancamiento máximo permitido (1.0 = sin
+# apalancamiento, la posición nunca excede el 100% del capital).
+TARGET_VOL: float = 0.50
+MAX_LEVERAGE: float = 1.0
+
+# Si es False, las señales negativas se recortan a 0 (solo largo/flat, sin
+# cortos) — útil si el usuario no puede o no quiere shortear.
+ALLOW_SHORT: bool = True
+
+# Ventana (en observaciones) de la volatilidad realizada usada para el
+# sizing por vol targeting en el backtest (rolling std de retornos).
+VOL_WINDOW: int = 30
