@@ -1,11 +1,11 @@
 """Script de exportación de un snapshot de datos OHLCV diario desde Binance.
 
 Uso puntual, de un solo uso (no forma parte del pipeline regular del
-proyecto): vuelca el histórico diario de todo `config.UNIVERSE` a CSV +
-Parquet en `data/snapshot/`, para compartir el dataset o verificar el
-pipeline offline. No reimplementa la descarga: usa `data.loaders.get_prices`
-(que ya pagina las klines de Binance) y `data.quality.validate_ohlcv` para
-loguear un reporte de calidad antes de guardar.
+proyecto): vuelca el histórico diario de todo `config.UNIVERSE` a Parquet
+en `data/snapshot/`, para compartir el dataset o verificar el pipeline
+offline. No reimplementa la descarga: usa `data.loaders.get_prices` (que ya
+pagina las klines de Binance) y `data.quality.validate_ohlcv` para loguear
+un reporte de calidad antes de guardar.
 
 Uso:
     python scripts/export_snapshot.py
@@ -39,7 +39,7 @@ GEOBLOCK_STATUS_CODES = (451, 403)
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Exporta un snapshot OHLCV diario de Binance (config.UNIVERSE) a CSV + Parquet."
+        description="Exporta un snapshot OHLCV diario de Binance (config.UNIVERSE) a Parquet."
     )
     parser.add_argument("--start", default=DEFAULT_START, help=f"Fecha de inicio ISO (default: {DEFAULT_START})")
     parser.add_argument(
@@ -118,11 +118,9 @@ def main() -> None:
         for w in report.warnings:
             logger.info("%s: %s", asset, w)
 
-        csv_path = out_dir / f"{asset}_1d.csv"
         parquet_path = out_dir / f"{asset}_1d.parquet"
-        df.to_csv(csv_path)
         df.to_parquet(parquet_path)
-        logger.info("%s: guardado '%s' y '%s' (%d filas)", asset, csv_path, parquet_path, len(df))
+        logger.info("%s: guardado '%s' (%d filas)", asset, parquet_path, len(df))
 
         summary[asset] = (len(df), df.index.min(), df.index.max())
 

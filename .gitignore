@@ -7,9 +7,7 @@ venv/
 *.egg-info/
 
 # Caché de datasets: se regenera con scripts/build_dataset.py.
-# Los CSV de verificación de CoinMetrics SÍ se commitean (ver excepción abajo).
 data/cache/*.parquet
-!data/cache/*_verification.csv
 
 .env
 .DS_Store
