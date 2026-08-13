@@ -10,3 +10,4 @@ jupyter>=1.0
 nbconvert>=7.0
 ipykernel>=6.0
 arch>=6.3
+scikit-learn>=1.3
