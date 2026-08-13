@@ -6,12 +6,27 @@ walk-forward es Fase 3b.
 
 REGLA ANTI-LOOKAHEAD: todas las features son TRAILING (calculadas con
 información hasta el cierre de cada fecha t, nunca con datos posteriores;
-ver el detalle de cada una en `build_feature_matrix`, incluida la única
-excepción documentada: `vol_garch`). Esto es tan importante acá como en
-`signals/engine.py` — una feature con lookahead invalida cualquier modelo
-entrenado sobre ella, aunque el LABEL (`ml.labeling.triple_barrier_labels`,
-que sí mira el futuro por diseño porque es el target, no una feature) esté
-perfectamente bien.
+ver el detalle de cada una en `build_feature_matrix`) — SIN EXCEPCIONES.
+Esto es tan importante acá como en `signals/engine.py` — una feature con
+lookahead invalida cualquier modelo entrenado sobre ella, aunque el LABEL
+(`ml.labeling.triple_barrier_labels`, que sí mira el futuro por diseño
+porque es el target, no una feature) esté perfectamente bien.
+
+HOTFIX (post Fase 3a): se removió la feature `vol_garch`. Ajustaba UN GARCH
+sobre TODA la serie a la vez (in-sample) y se documentó en su momento como
+"la única excepción" a la regla anti-lookahead — pero un data leakage
+documentado sigue siendo data leakage: se confirmó truncando la serie en una
+fecha t y viendo que la fila de `vol_garch` en t cambiaba según cuánto futuro
+hubiera disponible al momento del ajuste (las otras 25 features no cambiaban).
+GARCH in-sample sigue siendo la herramienta correcta como MOTOR DE RIESGO
+para la foto actual (ver `models.garch` y `signals.engine.latest_recommendation`,
+que ajustan un GARCH sobre toda la historia disponible HASTA HOY para estimar
+el régimen de volatilidad vigente — eso no es leakage, es exactamente lo que
+se quiere: la mejor estimación posible con toda la información disponible al
+momento de decidir). El problema es específicamente usarlo como FEATURE de
+entrenamiento sobre una serie histórica completa, donde "hoy" varía fila a
+fila pero el ajuste no. Ver `garch_feature_walkforward` más abajo para la
+alternativa causal (no implementada todavía).
 """
 
 from __future__ import annotations
@@ -22,10 +37,9 @@ import numpy as np
 import pandas as pd
 
 from config import PERIODS_PER_YEAR
-from ml.labeling import get_sample_weights
-from models.garch import conditional_volatility, select_best_model
+from ml.labeling import DEFAULT_VOLATILITY_SPAN, get_daily_volatility, get_sample_weights
 from signals.indicators import add_all_indicators
-from signals.returns import log_returns, simple_returns
+from signals.returns import simple_returns
 
 logger = logging.getLogger(__name__)
 
@@ -49,23 +63,15 @@ def build_feature_matrix(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
       retornos simples (`signals.returns.simple_returns`), ANUALIZADO
       (`* sqrt(config.PERIODS_PER_YEAR)`) — volatilidad reciente realizada,
       trailing.
-    - "vol_garch": volatilidad condicional GARCH (`models.garch`,
-      `select_best_model` + `conditional_volatility`, sobre log-retornos)
-      como feature de RÉGIMEN de volatilidad.
-
-      CAVEAT IMPORTANTE (única excepción a la regla anti-lookahead de este
-      módulo): el modelo GARCH se ajusta UNA SOLA VEZ sobre TODA la serie de
-      `df_ohlcv` a la vez, por eficiencia (re-ajustar un GARCH día por día
-      sería prohibitivamente lento para una matriz de features). Como el
-      ajuste es conjunto, técnicamente la vol GARCH estimada para una fecha
-      temprana está informada, a través de los parámetros del modelo, por
-      datos de fechas POSTERIORES — un lookahead real, aunque sutil. Es un
-      trade-off deliberado para Fase 3a. En Fase 3b/3c, cuando se arme la
-      validación walk-forward, esta feature debe recalcularse re-ajustando
-      el GARCH solo con datos hasta cada fecha de corte, no con este ajuste
-      único in-sample. Si el GARCH no converge (`select_best_model` agota
-      su grilla), se loguea un warning y la columna queda en NaN en vez de
-      romper toda la matriz de features.
+    - "vol_ewma": volatilidad diaria vía EWMA de retornos
+      (`ml.labeling.get_daily_volatility`, span=`DEFAULT_VOLATILITY_SPAN`,
+      reutilizada tal cual, NO reimplementada acá) — una segunda medida de
+      volatilidad, con memoria más larga y suavizado exponencial en vez de
+      ventana rolling fija, pero igual de CAUSAL/trailing que
+      `vol_realizada_20`. Es el sustituto causal de la ex-feature
+      `vol_garch` (ver HOTFIX en el docstring del módulo): no captura
+      asimetría ni clustering tan bien como un GARCH, pero no tiene
+      leakage.
 
     Devuelve una copia de `df_ohlcv` con todas las columnas de
     `add_all_indicators` más las agregadas acá.
@@ -79,16 +85,31 @@ def build_feature_matrix(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
     realized_vol = simple_returns(close).rolling(window=_REALIZED_VOL_WINDOW).std(ddof=1)
     out["vol_realizada_20"] = realized_vol * np.sqrt(PERIODS_PER_YEAR)
 
-    try:
-        garch_returns = log_returns(close).dropna()
-        best = select_best_model(garch_returns, criterion="aic")
-        cond_vol = conditional_volatility(best["result"])
-        out["vol_garch"] = cond_vol.reindex(out.index)
-    except Exception as exc:  # noqa: BLE001 - un GARCH que no converge no debe tumbar toda la matriz
-        logger.warning("build_feature_matrix: GARCH no convergió, 'vol_garch' queda en NaN: %s", exc)
-        out["vol_garch"] = np.nan
+    out["vol_ewma"] = get_daily_volatility(close, span=DEFAULT_VOLATILITY_SPAN)
 
     return out
+
+
+def garch_feature_walkforward(df_ohlcv: pd.DataFrame, *args, **kwargs) -> pd.Series:
+    """STUB — NO IMPLEMENTADO. Placeholder documentado para una futura
+    feature de volatilidad GARCH que sí sea causal.
+
+    Para que una vol GARCH sirva como FEATURE de entrenamiento (a diferencia
+    de su uso legítimo como motor de riesgo para la foto actual, ver
+    `models.garch`), habría que re-ajustar el modelo en cada fecha de corte
+    usando SOLO los datos disponibles hasta ese momento (ventana expansiva o
+    rolling), no una vez sobre toda la serie — literalmente lo mismo que ya
+    hace `models.arima.walk_forward_directional_accuracy` para el baseline
+    ARIMA, pero para GARCH. Es costoso (un ajuste de grilla de 6 modelos por
+    cada fecha, no uno solo para toda la serie) y por eso se difiere a una
+    fase futura de este proyecto en vez de resolverse acá. No debe llamarse
+    esta función todavía: existe solo para documentar la intención y dejar
+    la puerta abierta.
+    """
+    raise NotImplementedError(
+        "garch_feature_walkforward todavía no está implementada — ver su docstring. "
+        "Usá 'vol_realizada_20' o 'vol_ewma' de build_feature_matrix mientras tanto."
+    )
 
 
 def align_features_labels(X: pd.DataFrame, labels_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, pd.Series]:

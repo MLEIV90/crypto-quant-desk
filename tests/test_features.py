@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from ml.features import align_features_labels, build_feature_matrix
 from ml.labeling import get_daily_volatility, triple_barrier_labels
@@ -29,10 +28,11 @@ def test_build_feature_matrix_has_expected_columns() -> None:
     features = build_feature_matrix(df)
 
     expected_new_cols = {
-        "ret_1", "ret_5", "ret_10", "ret_20", "vol_realizada_20", "vol_garch",
+        "ret_1", "ret_5", "ret_10", "ret_20", "vol_realizada_20", "vol_ewma",
         "rsi_14", "macd", "macd_hist", "bb_pct_b", "bb_bandwidth", "atr_14",
     }
     assert expected_new_cols.issubset(set(features.columns))
+    assert "vol_garch" not in features.columns  # removida por leakage, ver HOTFIX del módulo
     assert set(df.columns).issubset(set(features.columns))
     assert "ret_1" not in df.columns  # no mutó el df original
 
@@ -46,11 +46,12 @@ def test_build_feature_matrix_ret_columns_match_pct_change() -> None:
         pd.testing.assert_series_equal(features[f"ret_{lag}"], expected, check_names=False)
 
 
-def test_build_feature_matrix_has_no_lookahead_except_documented_garch_caveat() -> None:
-    # Verificación de causalidad: ninguna feature en el día t debería
-    # cambiar si se altera el precio de un día POSTERIOR — salvo vol_garch,
-    # que por diseño ajusta el GARCH una sola vez sobre toda la serie
-    # (caveat documentado explícitamente en build_feature_matrix).
+def test_build_feature_matrix_has_no_lookahead_via_perturbation() -> None:
+    # Verificación de causalidad, método 1 (perturbación de un solo punto):
+    # ninguna feature en el día t debería cambiar si se altera el precio de
+    # un día POSTERIOR. Ya no hay excepciones documentadas (vol_garch se
+    # removió por leakage, ver HOTFIX del módulo) — el test cubre TODAS las
+    # columnas.
     df = _synthetic_ohlcv(n=250, seed=1)
     features_original = build_feature_matrix(df)
 
@@ -60,26 +61,31 @@ def test_build_feature_matrix_has_no_lookahead_except_documented_garch_caveat() 
 
     features_perturbed = build_feature_matrix(df_perturbed)
 
-    non_garch_cols = [c for c in features_original.columns if c != "vol_garch"]
-    pd.testing.assert_frame_equal(
-        features_original[non_garch_cols].iloc[:-1],
-        features_perturbed[non_garch_cols].iloc[:-1],
-    )
+    pd.testing.assert_frame_equal(features_original.iloc[:-1], features_perturbed.iloc[:-1])
 
 
-def test_build_feature_matrix_survives_garch_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    import ml.features as features_module
+def test_build_feature_matrix_has_no_lookahead_via_truncation() -> None:
+    """Verificación de causalidad, método 2 (TRUNCACIÓN — más estricto que
+    perturbar un solo punto): para varias fechas de corte t, construir la
+    matriz de features con la serie truncada en t (`df.loc[:t]`) y con la
+    serie completa deben dar EXACTAMENTE la misma fila para t, en TODAS las
+    columnas. Este test es el que hubiera detectado el leakage de la
+    ex-feature `vol_garch` (que dependía de cuánta historia FUTURA hubiera
+    disponible al momento del ajuste, no solo del pasado hasta t) — con
+    perturbación de un solo punto quedaba enmascarado si el punto alterado
+    estaba lejos del final de la ventana de ajuste.
+    """
+    df = _synthetic_ohlcv(n=250, seed=1)
+    features_full = build_feature_matrix(df)
 
-    def fake_select_best_model(returns, criterion="aic"):
-        raise RuntimeError("simulación de fallo de convergencia")
+    for cutoff_pos in (100, 150, 200, 249):
+        cutoff_date = df.index[cutoff_pos]
+        features_truncated = build_feature_matrix(df.loc[:cutoff_date])
 
-    monkeypatch.setattr(features_module, "select_best_model", fake_select_best_model)
+        row_full = features_full.loc[cutoff_date]
+        row_truncated = features_truncated.loc[cutoff_date]
 
-    df = _synthetic_ohlcv(n=100)
-    features = build_feature_matrix(df)
-
-    assert "vol_garch" in features.columns
-    assert features["vol_garch"].isna().all()
+        pd.testing.assert_series_equal(row_full, row_truncated, check_names=False, rtol=1e-6)
 
 
 # --------------------------------------------------------------------------
