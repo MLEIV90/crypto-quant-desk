@@ -14,3 +14,7 @@ data/cache/*.parquet
 .env
 .DS_Store
 .ipynb_checkpoints/
+
+# Snapshot de exportación puntual (scripts/export_snapshot.py): se comparte
+# manualmente, no se versiona.
+data/snapshot/
