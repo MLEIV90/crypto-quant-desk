@@ -5,10 +5,11 @@ Solo arma la UI y orquesta a los workers de `app.workers`: dispara
 nunca por espera bloqueante), vuelca su `AnalysisResult` a los widgets de
 gráficos, al panel de riesgo (pestaña "Riesgo", Fase 4a) y al panel de
 señales (pestaña "Señales", Fase 4b) — mismo resultado, dos vistas, un solo
-cómputo. La pestaña "Backtest" (Fase 4b) es independiente: tiene su propio
-selector/botón porque dispara su propio worker (`BacktestWorker`), un
-cómputo aparte del análisis de riesgo/señales. Ningún cálculo de negocio
-vive acá — ver `app/__init__.py` para la regla de separación modelo/vista.
+cómputo. Las pestañas "Backtest" (Fase 4b) y "Predicción (ML)" (Fase 5b)
+son independientes: cada una tiene su propio selector/botón porque dispara
+su propio worker (`BacktestWorker`/`PredictionWorker`), un cómputo aparte
+del análisis de riesgo/señales. Ningún cálculo de negocio vive acá — ver
+`app/__init__.py` para la regla de separación modelo/vista.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 from app.theme import STYLESHEET  # noqa: E402
 from app.widgets.backtest_panel import BacktestPanel  # noqa: E402
 from app.widgets.plot_canvas import PriceCanvas, VolatilityCanvas  # noqa: E402
+from app.widgets.prediction_panel import PredictionPanel  # noqa: E402
 from app.widgets.risk_panel import RiskPanel  # noqa: E402
 from app.widgets.signals_panel import SignalsPanel  # noqa: E402
 from app.workers import AnalysisWorker  # noqa: E402
@@ -111,6 +113,9 @@ class MainWindow(QMainWindow):
 
         self.backtest_panel = BacktestPanel()
         self.tabs.addTab(self.backtest_panel, "Backtest")
+
+        self.prediction_panel = PredictionPanel()
+        self.tabs.addTab(self.prediction_panel, "Predicción (ML)")
 
         return self.tabs
 

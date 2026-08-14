@@ -9,11 +9,13 @@ la ventana principal dibuja, ver `app/__init__.py`).
   riesgo y el panel de señales.
 - `BacktestWorker` (Fase 4b): backtest de la estrategia del engine vs. buy &
   hold para el panel de backtest.
+- `PredictionWorker` (Fase 5b): predicción OOS del modelo primario de ML
+  (enriquecido con on-chain para BTC/ETH) para la pestaña "Predicción (ML)".
 
-Ninguno de los dos reimplementa cálculos: cada paso es una llamada directa a
-una función ya existente del backend (`data.loaders.get_prices`,
+Ninguno reimplementa cálculos: cada paso es una llamada directa a una
+función ya existente del backend (`data.loaders.get_prices`,
 `signals.returns`, `signals.engine`, `models.garch`, `metrics.risk_measures`,
-`backtest.engine`).
+`backtest.engine`, `ml.features`, `ml.labeling`, `ml.models`).
 """
 
 from __future__ import annotations
@@ -27,6 +29,9 @@ from PySide6.QtCore import QThread, Signal
 from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
 from data.loaders import get_prices
 from metrics.risk_measures import expected_shortfall, value_at_risk
+from ml.features import align_features_labels, build_feature_matrix
+from ml.labeling import get_daily_volatility, triple_barrier_labels
+from ml.models import evaluate_primary_with_roc_auc, feature_importances, fit_final, latest_oos_prediction, t1_from_labels
 from models.garch import conditional_volatility, select_best_model, volatility_regime
 from signals.engine import generate_positions, latest_recommendation
 from signals.returns import log_returns, simple_returns
@@ -200,4 +205,133 @@ class BacktestWorker(QThread):
             equity_curve_buy_and_hold=result_buy_and_hold.equity_curve,
             metrics_estrategia=comparacion["estrategia"],
             metrics_buy_and_hold=comparacion["buy_and_hold"],
+        )
+
+
+# Activos con cobertura on-chain suficiente en CoinMetrics Community para
+# alimentar el modelo enriquecido (BTC/ETH tienen el set completo, incluidos
+# flujos de exchange — ver `data/onchain.py` y el resumen de
+# `scripts/export_onchain.py`). SOL no tiene nada; BNB/LTC tienen cobertura
+# PARCIAL y, en el caso de BNB, un histórico on-chain que corta en 2019 —
+# demasiado viejo para alimentar una predicción de HOY. Para esos tres, la
+# pestaña de predicción usa solo features técnicas y lo avisa en la UI.
+ONCHAIN_ENABLED_ASSETS: frozenset[str] = frozenset({"BTC", "ETH"})
+
+# n_splits/embargo de la validación purgeada que corre esta pestaña — los
+# mismos usados en la validación de Fase 5b (ver ml/models.py).
+_PREDICTION_N_SPLITS = 5
+_PREDICTION_EMBARGO_PCT = 0.01
+_TOP_N_FEATURES = 8
+
+_CLASS_DISPLAY: dict[float, str] = {-1.0: "SHORT", 0.0: "FLAT", 1.0: "LONG"}
+
+
+@dataclass
+class PredictionResult:
+    """Todo lo que necesita `app.widgets.prediction_panel.PredictionPanel`
+    para pintar la pestaña "Predicción (ML)" — ver `PredictionWorker._predict`.
+    """
+
+    asset: str
+    used_onchain: bool
+    onchain_columns: list[str]
+    ultima_fecha: pd.Timestamp
+    prediccion_clase: str
+    prediccion_confianza: float
+    prediccion_proba: dict[str, float]
+    accuracy_media: float
+    baseline_azar: float
+    baseline_mayoritaria: float
+    supera_azar: bool
+    supera_mayoritaria: bool
+    roc_auc_media: float
+    top_features: list[tuple[str, float]]
+
+
+class PredictionWorker(QThread):
+    """Ejecuta, en un hilo separado, el modelo primario de ML (Fase 3c) —
+    enriquecido con on-chain para BTC/ETH (Fase 5b, `ONCHAIN_ENABLED_ASSETS`),
+    solo técnico para el resto — y arma una `PredictionResult`: la
+    predicción OOS honesta más reciente (con probabilidad real, no un
+    proxy), si el modelo le gana a los baselines triviales, y qué features
+    pesan más.
+
+    No reimplementa NINGÚN cálculo de ML: cada paso es una llamada directa
+    a `ml.features`/`ml.labeling`/`ml.models`, reutilizados tal cual.
+    Mismo patrón que `AnalysisWorker`/`BacktestWorker`: señales
+    `resultado_listo(object)` / `error(str)`, se arranca con `.start()`.
+    """
+
+    resultado_listo = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, asset: str, parent=None) -> None:
+        super().__init__(parent)
+        self.asset = asset
+
+    def run(self) -> None:
+        try:
+            resultado = self._predict(self.asset)
+        except Exception as exc:  # noqa: BLE001 - cualquier falla debe llegar a la UI como mensaje, no como crash
+            logger.exception("PredictionWorker: falló la predicción de %s", self.asset)
+            self.error.emit(f"No se pudo predecir {self.asset}: {exc}")
+            return
+        self.resultado_listo.emit(resultado)
+
+    def _predict(self, asset: str) -> PredictionResult:
+        use_onchain = asset in ONCHAIN_ENABLED_ASSETS
+
+        # 1) Precios + matriz de features (técnica, o técnica+on-chain).
+        df = get_prices(asset, source="store")
+        close = df["close"]
+
+        X_raw = build_feature_matrix(df, include_onchain=use_onchain, asset=asset if use_onchain else None)
+        onchain_columns: list[str] = []
+        if use_onchain:
+            X_technical_raw = build_feature_matrix(df, include_onchain=False)
+            onchain_columns = [c for c in X_raw.columns if c not in X_technical_raw.columns]
+
+        # 2) Target triple-barrier + alineación (Fase 3a) + t1 para la
+        #    validación purgeada (Fase 3b).
+        volatility = get_daily_volatility(close)
+        labels_df = triple_barrier_labels(close, volatility)
+        X, y, sample_weight = align_features_labels(X_raw, labels_df)
+        t1 = t1_from_labels(labels_df, X.index)
+
+        # 3) Evaluación purgeada (accuracy/F1/ROC-AUC vs. baselines, Fase 3c/5b).
+        evaluacion = evaluate_primary_with_roc_auc(
+            X, y, t1, sample_weight=sample_weight,
+            n_splits=_PREDICTION_N_SPLITS, embargo_pct=_PREDICTION_EMBARGO_PCT,
+        )
+
+        # 4) Predicción OOS honesta (con probabilidad real) para la última fecha.
+        prediccion = latest_oos_prediction(
+            X, y, t1, sample_weight=sample_weight,
+            n_splits=_PREDICTION_N_SPLITS, embargo_pct=_PREDICTION_EMBARGO_PCT,
+        )
+
+        # 5) Feature importances: ajuste FINAL sobre toda la data (Fase 3c,
+        #    `fit_final`) — solo para interpretar qué pesa más, NUNCA para
+        #    predecir (esa es la predicción OOS del paso 4).
+        model = fit_final(X, y, sample_weight=sample_weight)
+        importances = feature_importances(model, X.columns)
+        top_features = [(str(name), float(val)) for name, val in importances.head(_TOP_N_FEATURES).items()]
+
+        proba_por_texto = {_CLASS_DISPLAY[k]: v for k, v in prediccion["proba"].items()}
+
+        return PredictionResult(
+            asset=asset,
+            used_onchain=use_onchain,
+            onchain_columns=onchain_columns,
+            ultima_fecha=prediccion["fecha"],
+            prediccion_clase=_CLASS_DISPLAY[prediccion["clase"]],
+            prediccion_confianza=prediccion["confianza"],
+            prediccion_proba=proba_por_texto,
+            accuracy_media=evaluacion["accuracy_media"],
+            baseline_azar=evaluacion["baseline_azar"],
+            baseline_mayoritaria=evaluacion["baseline_mayoritaria"],
+            supera_azar=evaluacion["supera_azar"],
+            supera_mayoritaria=evaluacion["supera_mayoritaria"],
+            roc_auc_media=evaluacion["roc_auc_media"],
+            top_features=top_features,
         )

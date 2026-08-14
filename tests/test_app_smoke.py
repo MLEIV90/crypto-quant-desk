@@ -4,11 +4,12 @@ verifica que no explota. NO testea interacción real (clicks, threads) — eso
 requeriría un entorno gráfico real; acá solo se confirma que la UI se arma
 sin excepciones y que los selectores/pestañas están bien poblados.
 
-La excepción es `BacktestWorker` (Fase 4b): SÍ se corre directamente (sin
-UI ni QThread.start(), como ya se hacía para validar `AnalysisWorker`) sobre
-un activo real (`source="store"`), para confirmar que el dict de métricas
-tiene las claves que usa `app.widgets.backtest_panel.BacktestPanel` — esto
-sí pega contra datos reales, no es un test puramente offline de UI.
+La excepción son `BacktestWorker` (Fase 4b) y `PredictionWorker` (Fase 5b):
+SÍ se corren directamente (sin UI ni `QThread.start()`, como ya se hacía
+para validar `AnalysisWorker`) sobre un activo real (`source="store"`),
+para confirmar que sus resultados tienen las claves que pintan
+`BacktestPanel`/`PredictionPanel` — esto sí pega contra datos reales
+(locales, del snapshot), no es un test puramente offline de UI.
 """
 
 from __future__ import annotations
@@ -83,13 +84,13 @@ def test_risk_panel_starts_empty_and_resets_cleanly(qapp) -> None:
     window.close()
 
 
-def test_cockpit_has_the_three_tabs(qapp) -> None:
+def test_cockpit_has_the_four_tabs(qapp) -> None:
     from app.main import MainWindow
 
     window = MainWindow()
     tabs = [window.tabs.tabText(i) for i in range(window.tabs.count())]
 
-    assert tabs == ["Riesgo", "Señales", "Backtest"]
+    assert tabs == ["Riesgo", "Señales", "Backtest", "Predicción (ML)"]
     window.close()
 
 
@@ -143,3 +144,47 @@ def test_backtest_worker_returns_expected_metric_keys_on_real_data() -> None:
     assert len(resultado.equity_curve_buy_and_hold) > 0
     assert resultado.equity_curve_estrategia.iloc[0] == pytest.approx(1.0)
     assert resultado.equity_curve_buy_and_hold.iloc[0] == pytest.approx(1.0)
+
+
+def test_prediction_panel_has_asset_combo_and_features_table(qapp) -> None:
+    from app.main import MainWindow
+    from app.widgets.prediction_panel import HONESTY_TEXT
+    from config import UNIVERSE
+
+    window = MainWindow()
+    panel = window.prediction_panel
+    items = [panel.asset_combo.itemText(i) for i in range(panel.asset_combo.count())]
+
+    assert set(items) == set(UNIVERSE.keys())
+    assert panel.predict_button.text() == "Predecir"
+    assert panel.clase_label.text() == "—"
+    assert panel.features_table.columnCount() == 2
+
+    warning_label = panel.findChild(type(panel.clase_label), "honestyWarning")
+    assert warning_label is not None
+    assert warning_label.text() == HONESTY_TEXT
+    window.close()
+
+
+def test_prediction_worker_returns_expected_fields_on_real_data() -> None:
+    """Corre `PredictionWorker._predict` directo (sin QThread ni UI) sobre
+    SOL real (técnicas solas — sin cobertura on-chain, más rápido que
+    BTC/ETH con on-chain) y verifica que el resultado tiene todo lo que
+    pinta `PredictionPanel`, incluida la aclaración honesta de si el modelo
+    le gana o no a los baselines.
+    """
+    from app.workers import PredictionWorker
+
+    worker = PredictionWorker("SOL")
+    resultado = worker._predict("SOL")
+
+    assert resultado.asset == "SOL"
+    assert resultado.used_onchain is False
+    assert resultado.onchain_columns == []
+    assert resultado.prediccion_clase in {"LONG", "FLAT", "SHORT"}
+    assert 0.0 <= resultado.prediccion_confianza <= 1.0
+    assert set(resultado.prediccion_proba.keys()) == {"LONG", "FLAT", "SHORT"}
+    assert sum(resultado.prediccion_proba.values()) == pytest.approx(1.0, abs=1e-6)
+    assert isinstance(resultado.supera_azar, bool)
+    assert isinstance(resultado.supera_mayoritaria, bool)
+    assert len(resultado.top_features) > 0

@@ -39,7 +39,7 @@ import logging
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.metrics import accuracy_score, f1_score, precision_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, roc_auc_score
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,12 @@ _SCORERS = {
     "f1": lambda y_true, y_pred: f1_score(y_true, y_pred, average="macro", zero_division=0),
     "precision": lambda y_true, y_pred: precision_score(y_true, y_pred, average="macro", zero_division=0),
 }
+
+# "roc_auc" se maneja aparte de _SCORERS (no en ese dict): a diferencia de
+# accuracy/f1/precision, necesita PROBABILIDADES (`predict_proba`), no la
+# clase predicha (`predict`), y para multiclase one-vs-rest necesita además
+# el set COMPLETO de clases del problema (`labels=`) — ver `purged_cv_score`.
+_PROBA_SCORING_KEYS = {"roc_auc"}
 
 
 def get_train_times(t1: pd.Series, test_times: pd.Series) -> pd.Series:
@@ -188,18 +194,27 @@ def purged_cv_score(
     clona (`sklearn.base.clone`) en cada fold para no arrastrar estado
     entre folds.
 
-    `scoring`: "accuracy", "f1" (macro) o "precision" (macro) — las
-    métricas de clasificación relevantes para las 3 clases del
-    triple-barrier (-1/0/+1).
+    `scoring`: "accuracy", "f1" (macro), "precision" (macro) — sobre la
+    clase predicha (`estimator.predict`) — o "roc_auc" (one-vs-rest,
+    promedio macro, sobre `estimator.predict_proba`; requiere que
+    `estimator` implemente `predict_proba`, p. ej. cualquier clasificador
+    de scikit-learn/XGBoost). Con "roc_auc", si algún fold de test termina
+    con MENOS de 2 clases presentes (caso borde en folds chicos/desbalanceados
+    — el ROC-AUC de esa clase queda indefinido), ese fold se omite del
+    promedio y se loguea un warning explícito en vez de fallar todo el
+    cómputo o inventar un valor.
 
-    Devuelve un dict: "scores" (lista, un valor por fold), "score_medio",
-    "score_std" (0.0 si hay un solo fold), "n_splits".
+    Devuelve un dict: "scores" (lista, un valor por fold — puede tener NaN
+    en folds omitidos de "roc_auc"), "score_medio" (promedio SOLO de los
+    folds válidos), "score_std" (0.0 si hay un solo fold válido, NaN si
+    ninguno lo es), "n_splits".
     """
-    if scoring not in _SCORERS:
-        raise ValueError(f"purged_cv_score: scoring debe ser uno de {list(_SCORERS)}, recibido '{scoring}'")
-    scorer = _SCORERS[scoring]
+    if scoring not in _SCORERS and scoring not in _PROBA_SCORING_KEYS:
+        valid = list(_SCORERS) + list(_PROBA_SCORING_KEYS)
+        raise ValueError(f"purged_cv_score: scoring debe ser uno de {valid}, recibido '{scoring}'")
 
     cv = PurgedKFold(n_splits=n_splits, t1=t1, embargo_pct=embargo_pct)
+    all_labels = sorted(y.unique()) if scoring in _PROBA_SCORING_KEYS else None
 
     scores: list[float] = []
     for fold_i, (train_pos, test_pos) in enumerate(cv.split(X)):
@@ -212,17 +227,37 @@ def purged_cv_score(
             fit_kwargs["sample_weight"] = sample_weight.iloc[train_pos].to_numpy()
         model.fit(X_train, y_train, **fit_kwargs)
 
-        y_pred = model.predict(X_test)
-        score = float(scorer(y_test, y_pred))
+        if scoring in _PROBA_SCORING_KEYS:
+            if y_test.nunique() < 2:
+                logger.warning(
+                    "purged_cv_score: fold %d/%d sin al menos 2 clases en el test, ROC-AUC indefinido — se omite (NaN)",
+                    fold_i + 1, n_splits,
+                )
+                scores.append(float("nan"))
+                continue
+            y_proba = model.predict_proba(X_test)
+            try:
+                score = float(roc_auc_score(y_test, y_proba, multi_class="ovr", average="macro", labels=all_labels))
+            except ValueError as exc:
+                logger.warning(
+                    "purged_cv_score: fold %d/%d ROC-AUC no se pudo calcular (%s) — se omite (NaN)",
+                    fold_i + 1, n_splits, exc,
+                )
+                score = float("nan")
+        else:
+            y_pred = model.predict(X_test)
+            score = float(_SCORERS[scoring](y_test, y_pred))
+
         scores.append(score)
         logger.info(
             "purged_cv_score: fold %d/%d, %s=%.4f (train=%d, test=%d)",
             fold_i + 1, n_splits, scoring, score, len(train_pos), len(test_pos),
         )
 
+    valid_scores = [s for s in scores if not np.isnan(s)]
     return {
         "scores": scores,
-        "score_medio": float(np.mean(scores)),
-        "score_std": float(np.std(scores, ddof=1)) if len(scores) > 1 else 0.0,
+        "score_medio": float(np.mean(valid_scores)) if valid_scores else float("nan"),
+        "score_std": float(np.std(valid_scores, ddof=1)) if len(valid_scores) > 1 else 0.0,
         "n_splits": n_splits,
     }

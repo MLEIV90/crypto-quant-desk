@@ -1,4 +1,11 @@
-"""Tests offline para ml/models.py (datasets sintéticos, sin red)."""
+"""Tests offline para ml/models.py (datasets sintéticos, sin red).
+
+`evaluate_with_without_onchain` es la excepción (Fase 5b): al ser una
+función orquestadora `asset -> dict` que arma sus propias features/labels
+desde cero, se testea contra el snapshot local real (`source="store"`),
+igual que ya hace `tests/test_app_smoke.py` para `BacktestWorker` — no hay
+red de por medio, solo lectura de los parquet ya exportados.
+"""
 
 from __future__ import annotations
 
@@ -8,11 +15,14 @@ import pytest
 
 from ml.models import (
     evaluate_primary,
+    evaluate_with_without_onchain,
     feature_importances,
     fit_final,
+    latest_oos_prediction,
     make_primary_model,
     model_to_positions,
     oos_predictions,
+    t1_from_labels,
 )
 
 
@@ -184,3 +194,89 @@ def test_model_to_positions_rejects_unexpected_values() -> None:
     preds = pd.Series([1.0, 2.0, 0.0])
     with pytest.raises(ValueError):
         model_to_positions(preds)
+
+
+# --------------------------------------------------------------------------
+# t1_from_labels
+# --------------------------------------------------------------------------
+
+
+def test_t1_from_labels_uses_positional_offset() -> None:
+    idx = pd.date_range("2020-01-01", periods=10, freq="D")
+    labels_df = pd.DataFrame(
+        {"dias_hasta_evento": [2.0, 3.0, np.nan, 1.0, np.nan, 4.0, 2.0, np.nan, np.nan, np.nan]},
+        index=idx,
+    )
+    valid_index = idx[[0, 1, 3, 5, 6]]
+
+    t1 = t1_from_labels(labels_df, valid_index)
+
+    assert t1.loc[idx[0]] == idx[0 + 2]
+    assert t1.loc[idx[1]] == idx[1 + 3]
+    assert t1.loc[idx[3]] == idx[3 + 1]
+    assert t1.loc[idx[5]] == idx[5 + 4]
+    assert t1.loc[idx[6]] == idx[6 + 2]
+    assert t1.index.equals(valid_index)
+
+
+# --------------------------------------------------------------------------
+# latest_oos_prediction
+# --------------------------------------------------------------------------
+
+
+def test_latest_oos_prediction_returns_expected_structure() -> None:
+    X, y, t1 = _synthetic_dataset(n=300, horizon=10, seed=7, learnable=True)
+
+    result = latest_oos_prediction(X, y, t1, n_splits=5, embargo_pct=0.01)
+
+    assert set(result.keys()) == {"fecha", "clase", "proba", "confianza"}
+    assert result["fecha"] == X.index[-1]
+    assert result["clase"] in {-1.0, 0.0, 1.0}
+    assert set(result["proba"].keys()) == {-1.0, 0.0, 1.0}
+    assert abs(sum(result["proba"].values()) - 1.0) < 1e-6
+    assert result["confianza"] == max(result["proba"].values())
+    assert result["proba"][result["clase"]] == result["confianza"]
+
+
+# --------------------------------------------------------------------------
+# evaluate_with_without_onchain (Fase 5b, datos reales vía source="store")
+# --------------------------------------------------------------------------
+
+
+def test_evaluate_with_without_onchain_returns_expected_keys_on_real_btc_data() -> None:
+    # n_splits chico a propósito: solo se busca validar la ESTRUCTURA del
+    # resultado y que corre de punta a punta sobre datos reales, no medir
+    # con precisión el desempeño (eso se corre aparte, con n_splits=5, para
+    # la validación honesta que se reporta en el PR de esta fase).
+    result = evaluate_with_without_onchain("BTC", n_splits=3, embargo_pct=0.01)
+
+    assert result["asset"] == "BTC"
+    assert result["n_muestras_periodo_comun"] > 0
+    assert result["periodo_inicio"] < result["periodo_fin"]
+    assert len(result["columnas_onchain_usadas"]) > 0
+    assert "net_flow_zscore" in result["columnas_onchain_usadas"]
+
+    expected_sub_keys = {
+        "accuracy_scores", "accuracy_media", "f1_scores", "f1_media",
+        "baseline_azar", "baseline_mayoritaria", "supera_azar", "supera_mayoritaria",
+        "n_clases", "n_muestras", "roc_auc_scores", "roc_auc_media",
+    }
+    for key in ("solo_tecnicas", "con_onchain"):
+        assert set(result[key].keys()) == expected_sub_keys
+        assert len(result[key]["accuracy_scores"]) == 3
+        assert len(result[key]["roc_auc_scores"]) == 3
+
+    # Ambas configuraciones se evaluaron sobre EXACTAMENTE la misma cantidad
+    # de muestras (mismo período común) — la comparación A/B es justa.
+    assert result["solo_tecnicas"]["n_muestras"] == result["con_onchain"]["n_muestras"]
+
+    assert isinstance(result["mejora_accuracy_media"], float)
+    assert 0 <= result["folds_con_mejora_onchain"] <= 3
+    assert isinstance(result["onchain_mejora_de_forma_consistente"], bool)
+
+
+def test_evaluate_with_without_onchain_raises_for_asset_without_onchain_coverage() -> None:
+    # SOL no tiene snapshot on-chain (ver data/onchain.py) — la comparación
+    # A/B no tiene sentido sin una segunda configuración que comparar.
+    with pytest.raises(ValueError, match="on-chain"):
+        evaluate_with_without_onchain("SOL", n_splits=3)

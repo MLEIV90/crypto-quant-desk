@@ -2,7 +2,10 @@
 
 Fase 3a: solo construcción de features y alineación con las etiquetas de
 `ml.labeling`. El entrenamiento de un modelo es Fase 3c; la validación
-walk-forward es Fase 3b.
+walk-forward es Fase 3b. Fase 5b agrega la opción `include_onchain` de
+`build_feature_matrix`, que mergea las features de `data/onchain.py`
+(ver ese módulo — también estrictamente trailing) — el resto del pipeline
+(alineación, pesos por solapamiento) es idéntico, con o sin on-chain.
 
 REGLA ANTI-LOOKAHEAD: todas las features son TRAILING (calculadas con
 información hasta el cierre de cada fecha t, nunca con datos posteriores;
@@ -37,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 from config import PERIODS_PER_YEAR
+from data.onchain import build_onchain_features, load_onchain, merge_onchain
 from ml.labeling import DEFAULT_VOLATILITY_SPAN, get_daily_volatility, get_sample_weights
 from signals.indicators import add_all_indicators
 from signals.returns import simple_returns
@@ -47,7 +51,9 @@ _RETURN_LAGS: tuple[int, ...] = (1, 5, 10, 20)
 _REALIZED_VOL_WINDOW: int = 20
 
 
-def build_feature_matrix(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
+def build_feature_matrix(
+    df_ohlcv: pd.DataFrame, include_onchain: bool = False, asset: str | None = None
+) -> pd.DataFrame:
     """Construye la matriz de features X a partir de un OHLCV estandarizado
     (el de `data.loaders.get_prices`). No modifica `df_ohlcv` in-place.
 
@@ -73,8 +79,25 @@ def build_feature_matrix(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
       asimetría ni clustering tan bien como un GARCH, pero no tiene
       leakage.
 
+    Si `include_onchain=True` (Fase 5b), además mergea las features on-chain
+    de `asset` (obligatorio en ese caso): `data.onchain.load_onchain` +
+    `data.onchain.build_onchain_features` + `data.onchain.merge_onchain`,
+    reutilizadas tal cual — no se reimplementa ningún cálculo on-chain acá.
+    Todas esas features ya son TRAILING/causales por construcción (ver
+    `data/onchain.py`), así que agregarlas no introduce ningún lookahead
+    nuevo. Si `asset` no tiene snapshot on-chain exportado (p. ej. SOL, ver
+    `data/onchain.py`), se loguea un warning y la matriz devuelta queda
+    IGUAL que con `include_onchain=False` — no se aborta, para que el
+    pipeline funcione de punta a punta incluso en activos sin cobertura
+    on-chain. Si el activo tiene cobertura PARCIAL (p. ej. BNB/LTC, sin
+    flujos de exchange), se agregan las que estén disponibles y se loguea
+    cuáles fueron.
+
     Devuelve una copia de `df_ohlcv` con todas las columnas de
-    `add_all_indicators` más las agregadas acá.
+    `add_all_indicators` más las agregadas acá (y las on-chain, si aplica).
+    Fuera de la cobertura on-chain (o si el activo no tiene), esas columnas
+    quedan en NaN — el warmup/alineación final es responsabilidad de
+    `align_features_labels`, igual que con cualquier otra feature.
     """
     out = add_all_indicators(df_ohlcv)
     close = out["close"]
@@ -86,6 +109,24 @@ def build_feature_matrix(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
     out["vol_realizada_20"] = realized_vol * np.sqrt(PERIODS_PER_YEAR)
 
     out["vol_ewma"] = get_daily_volatility(close, span=DEFAULT_VOLATILITY_SPAN)
+
+    if include_onchain:
+        if asset is None:
+            raise ValueError("build_feature_matrix: 'asset' es obligatorio si include_onchain=True")
+        try:
+            onchain_raw = load_onchain(asset)
+        except FileNotFoundError as exc:
+            logger.warning(
+                "build_feature_matrix: '%s' sin on-chain disponible (%s) — se sigue solo con features técnicas.",
+                asset, exc,
+            )
+        else:
+            onchain_feats = build_onchain_features(onchain_raw)
+            out = merge_onchain(out, onchain_feats)
+            logger.info(
+                "build_feature_matrix: '%s' — features on-chain agregadas: %s",
+                asset, list(onchain_feats.columns),
+            )
 
     return out
 
