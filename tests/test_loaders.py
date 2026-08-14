@@ -142,6 +142,72 @@ def test_get_prices_source_store_end_to_end(tmp_path: Path, monkeypatch: pytest.
     assert out.index.is_monotonic_increasing
 
 
+def _write_fake_hourly_snapshot(directory: Path, asset: str) -> pd.DataFrame:
+    idx = pd.date_range("2020-01-01", periods=8, freq="h", tz="UTC")
+    df = pd.DataFrame(
+        {
+            "open": np.arange(1.0, 9.0),
+            "high": np.arange(1.0, 9.0),
+            "low": np.arange(1.0, 9.0),
+            "close": np.arange(1.0, 9.0),
+            "volume": np.arange(10.0, 90.0, 10.0),
+        },
+        index=idx,
+    )
+    df.index.name = "timestamp"
+    df.to_parquet(directory / f"{asset}_1h.parquet")
+    return df
+
+
+def test_load_store_reads_hourly_snapshot_when_interval_is_1h(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fase 6b: interval="1h" debe leer "{asset}_1h.parquet", un archivo
+    # DISTINTO del diario ("{asset}_1d.parquet") — ambos pueden coexistir
+    # en el mismo SNAPSHOT_DIR sin pisarse.
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    _write_fake_snapshot(tmp_path, "BTC", interval="1d")
+    _write_fake_hourly_snapshot(tmp_path, "BTC")
+
+    df = loaders._load_store("BTC", "1h", "2020-01-01", "2020-01-02")
+
+    assert list(df.columns) == loaders.STANDARD_COLUMNS
+    assert len(df) == 8  # las 8 velas horarias, no las 5 diarias
+    assert df["close"].iloc[-1] == pytest.approx(8.0)
+
+
+def test_get_prices_source_store_end_to_end_hourly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    _write_fake_snapshot(tmp_path, "BTC", interval="1d")  # coexiste, no debe mezclarse
+    _write_fake_hourly_snapshot(tmp_path, "BTC")
+
+    out = loaders.get_prices(
+        "BTC", source="store", interval="1h", start="2020-01-01", end="2020-01-02", use_cache=False
+    )
+
+    assert list(out.columns) == loaders.STANDARD_COLUMNS
+    assert len(out) == 8
+    assert out.index.tz is not None
+    assert out.index.is_monotonic_increasing
+
+
+def test_get_prices_source_store_default_interval_still_reads_daily(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """interval="1d" (default, sin pasar `interval=` explícito) sigue
+    leyendo el snapshot diario — la parametrización por interval de Fase 6b
+    no rompió el caso default preexistente.
+    """
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    _write_fake_snapshot(tmp_path, "BTC", interval="1d")
+    _write_fake_hourly_snapshot(tmp_path, "BTC")
+
+    out = loaders.get_prices("BTC", source="store", start="2020-01-01", end="2020-01-05", use_cache=False)
+
+    assert len(out) == 5
+    assert out["close"].iloc[-1] == pytest.approx(5.0)  # vino del snapshot diario, no del horario
+
+
 # --------------------------------------------------------------------------
 # get_prices: fallback entre fuentes
 # --------------------------------------------------------------------------
