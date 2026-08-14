@@ -132,6 +132,34 @@ def test_build_feature_matrix_has_no_lookahead_via_truncation() -> None:
         pd.testing.assert_series_equal(row_full, row_truncated, check_names=False, rtol=1e-6)
 
 
+def test_build_feature_matrix_has_no_lookahead_via_truncation_on_hourly_index() -> None:
+    """Fase 6c: mismo test de causalidad por truncación que
+    `test_build_feature_matrix_has_no_lookahead_via_truncation`, ahora
+    sobre un índice HORARIO (freq="h") en vez de diario — confirma que la
+    garantía de causalidad no depende de la frecuencia del índice: ninguna
+    feature de `build_feature_matrix` usa aritmética de fechas, todas son
+    posicionales o `rolling`/`ewm` sobre el índice que reciban, sea cual
+    sea su frecuencia.
+    """
+    rng = np.random.default_rng(21)
+    close = 100.0 * np.exp(np.cumsum(rng.normal(0.00001, 0.003, 300)))
+    idx = pd.date_range("2020-01-01", periods=300, freq="h", tz="UTC")
+    df = pd.DataFrame(
+        {"open": close, "high": close * 1.002, "low": close * 0.998, "close": close, "volume": 1000.0}, index=idx
+    )
+
+    features_full = build_feature_matrix(df)
+
+    for cutoff_pos in (100, 150, 250, 299):
+        cutoff_date = df.index[cutoff_pos]
+        features_truncated = build_feature_matrix(df.loc[:cutoff_date])
+
+        row_full = features_full.loc[cutoff_date]
+        row_truncated = features_truncated.loc[cutoff_date]
+
+        pd.testing.assert_series_equal(row_full, row_truncated, check_names=False, rtol=1e-6)
+
+
 # --------------------------------------------------------------------------
 # build_feature_matrix: include_onchain (Fase 5b)
 # --------------------------------------------------------------------------

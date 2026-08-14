@@ -125,6 +125,55 @@ def test_purged_kfold_train_never_overlaps_test_range_in_any_fold() -> None:
         assert not (starts_during_test | ends_during_test | envelops_test).any()
 
 
+def _overlapping_horizon_dataset_hourly(
+    n: int, horizon: int, seed: int = 0
+) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+    """Igual que `_overlapping_horizon_dataset`, pero con índice HORARIO
+    (freq="h") — Fase 6c: `PurgedKFold`/`get_train_times` no asumen nada
+    sobre la frecuencia del índice (son puramente posicionales/de
+    comparación de Timestamps, ver sus docstrings), así que el mismo
+    mecanismo debe funcionar igual sobre horas que sobre días. Se deja
+    probado explícitamente en vez de asumirlo.
+    """
+    rng = np.random.default_rng(seed)
+    state = np.cumsum(rng.normal(0.0, 1.0, n + horizon))
+    idx = pd.date_range("2020-01-01", periods=n + horizon, freq="h")
+
+    X = pd.DataFrame({"x": state[:n]}, index=idx[:n])
+    y = pd.Series(np.where(state[horizon : horizon + n] > state[:n], 1, -1), index=idx[:n])
+    t1 = pd.Series(idx[horizon : horizon + n], index=idx[:n])
+    return X, y, t1
+
+
+def test_purged_kfold_train_never_overlaps_test_range_on_hourly_index() -> None:
+    """Fase 6c: mismo chequeo que
+    `test_purged_kfold_train_never_overlaps_test_range_in_any_fold`, ahora
+    sobre índice horario con un horizonte de 24 velas (1 día, el
+    `DEFAULT_MAX_HOLDING_HOURLY` de `ml.labeling`) y un embargo ESCALADO al
+    horizonte: igual criterio que en la evaluación real de Fase 6c —
+    ~3x el horizonte (72h), expresado como fracción del total de muestras
+    (la misma razón embargo:horizonte que ya usaba embargo_pct=0.01 en
+    diario, ~30 días de embargo sobre un horizonte de 10 días).
+    """
+    n, horizon = 5000, 24
+    X, _, t1 = _overlapping_horizon_dataset_hourly(n=n, horizon=horizon, seed=7)
+    embargo_pct = (3 * horizon) / n
+
+    pkf = PurgedKFold(n_splits=5, t1=t1, embargo_pct=embargo_pct)
+    for train_pos, test_pos in pkf.split(X):
+        test_start = t1.index[test_pos[0]]
+        test_end = t1.iloc[test_pos].max()
+
+        train_starts = t1.index[train_pos]
+        train_t1 = t1.iloc[train_pos]
+
+        starts_during_test = (train_starts >= test_start) & (train_starts <= test_end)
+        ends_during_test = (train_t1 >= test_start) & (train_t1 <= test_end)
+        envelops_test = (train_starts <= test_start) & (train_t1 >= test_end)
+
+        assert not (starts_during_test | ends_during_test | envelops_test).any()
+
+
 # --------------------------------------------------------------------------
 # El embargo elimina la franja posterior al test
 # --------------------------------------------------------------------------

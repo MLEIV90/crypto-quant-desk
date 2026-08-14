@@ -6,7 +6,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ml.labeling import get_daily_volatility, get_sample_weights, triple_barrier_labels
+from ml.labeling import (
+    DEFAULT_MAX_HOLDING_HOURLY,
+    DEFAULT_VOLATILITY_SPAN_HOURLY,
+    get_daily_volatility,
+    get_sample_weights,
+    triple_barrier_labels,
+)
 
 
 def _trending_close(n: int = 60, drift: float = 0.02, noise_std: float = 0.002, seed: int = 0) -> pd.Series:
@@ -22,6 +28,14 @@ def _flat_close(n: int = 60, noise_std: float = 0.0005, seed: int = 0) -> pd.Ser
     returns = rng.normal(0.0, noise_std, n)
     close = 100.0 * np.cumprod(1.0 + returns)
     idx = pd.date_range("2020-01-01", periods=n, freq="D")
+    return pd.Series(close, index=idx)
+
+
+def _trending_close_hourly(n: int = 500, drift: float = 0.0005, noise_std: float = 0.001, seed: int = 0) -> pd.Series:
+    rng = np.random.default_rng(seed)
+    returns = drift + rng.normal(0.0, noise_std, n)
+    close = 100.0 * np.cumprod(1.0 + returns)
+    idx = pd.date_range("2020-01-01", periods=n, freq="h")
     return pd.Series(close, index=idx)
 
 
@@ -129,6 +143,44 @@ def test_triple_barrier_last_max_holding_rows_are_nan() -> None:
     # La fila justo ANTES de la cola sí debería tener etiqueta (siempre que
     # tenga volatilidad válida, ver warmup del EWMA).
     assert pd.notna(labels_df["label"].iloc[-max_holding - 1])
+
+
+# --------------------------------------------------------------------------
+# Índice HORARIO (Fase 6c): mismo algoritmo, otra frecuencia de vela
+# --------------------------------------------------------------------------
+
+
+def test_get_daily_volatility_is_trailing_on_hourly_index() -> None:
+    close = _trending_close_hourly(n=500, seed=1)
+    vol = get_daily_volatility(close, span=DEFAULT_VOLATILITY_SPAN_HOURLY)
+
+    valid = vol.dropna()
+    assert len(valid) > 0
+    assert (valid > 0).all()
+
+    # Trailing: recortar la cola no debería cambiar los valores ya calculados.
+    vol_truncated = get_daily_volatility(close.iloc[:400], span=DEFAULT_VOLATILITY_SPAN_HOURLY)
+    pd.testing.assert_series_equal(vol.iloc[:400], vol_truncated)
+
+
+def test_triple_barrier_labels_works_on_hourly_index_with_24h_horizon() -> None:
+    """Fase 6c: `max_holding=24` sobre velas horarias es un horizonte de
+    ETIQUETA de 1 día — mismo mecanismo POSICIONAL que con velas diarias
+    (ver docstring del módulo), solo que ahora "24 velas" son 24 horas, no
+    24 días. No hay ninguna asunción de frecuencia diaria escondida en el
+    código: nada de esto necesitó cambiar para funcionar acá.
+    """
+    close = _trending_close_hourly(n=500, drift=0.002, noise_std=0.001, seed=2)
+    vol = get_daily_volatility(close, span=DEFAULT_VOLATILITY_SPAN_HOURLY)
+    max_holding = DEFAULT_MAX_HOLDING_HOURLY
+
+    labels_df = triple_barrier_labels(close, vol, max_holding=max_holding)
+
+    valid_labels = labels_df["label"].dropna()
+    assert len(valid_labels) > 0
+    assert labels_df["label"].iloc[-max_holding:].isna().all()
+    assert set(valid_labels.unique()).issubset({-1.0, 0.0, 1.0})
+    assert (labels_df.loc[valid_labels.index, "dias_hasta_evento"] <= max_holding).all()
 
 
 # --------------------------------------------------------------------------

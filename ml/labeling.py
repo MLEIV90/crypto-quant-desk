@@ -7,6 +7,16 @@ acá (eso es Fase 3c) ni se implementa la validación walk-forward (Fase 3b).
 Convención del proyecto: `close` en escala de precio (no retornos), los
 retornos internos se calculan en escala DECIMAL/SIMPLE
 (`signals.returns.simple_returns`), consistente con el resto del repo.
+
+FRECUENCIA DE LAS VELAS (Fase 6c): pese a los nombres "get_daily_volatility"
+y a que la documentación de abajo hable de "días", NINGUNA función de este
+módulo asume que el índice de `close` sea diario — `max_holding`, `span` y
+"días hasta el evento" cuentan VELAS/BARRAS del índice recibido, no días de
+calendario (el código es puramente posicional, ver `triple_barrier_labels`
+más abajo). Fase 6c reentrena sobre velas HORARIAS con
+`DEFAULT_MAX_HOLDING_HOURLY`/`DEFAULT_VOLATILITY_SPAN_HOURLY` (ver más
+abajo) en vez de los defaults diarios — mismos algoritmos, sin cambiar una
+sola línea de lógica, solo los parámetros con los que se llaman.
 """
 
 from __future__ import annotations
@@ -25,18 +35,37 @@ DEFAULT_PT_MULT: float = 2.0
 DEFAULT_SL_MULT: float = 2.0
 DEFAULT_MAX_HOLDING: int = 10
 
+# Presets HORARIOS (Fase 6c) — mismo algoritmo que los defaults diarios de
+# arriba, parámetros elegidos para preservar la misma PROPORCIÓN
+# memoria-de-volatilidad : horizonte-de-etiqueta que ya usaba el preset
+# diario (100 días de memoria EWMA / 10 días de horizonte = 10x):
+#   - DEFAULT_MAX_HOLDING_HOURLY = 24 velas horarias = 1 día de horizonte
+#     de etiqueta (equivalente, en tiempo real, a ~1 día — bastante más
+#     corto que las 10 velas/10 días del preset diario, a propósito: un
+#     bot que opera en horario reacciona en horizontes más cortos).
+#   - DEFAULT_VOLATILITY_SPAN_HOURLY = 240 velas horarias = 10 días de
+#     memoria EWMA (24h * 10 = 240h), guardando la misma razón 10x sobre
+#     el nuevo horizonte de 24h.
+DEFAULT_MAX_HOLDING_HOURLY: int = 24
+DEFAULT_VOLATILITY_SPAN_HOURLY: int = 240
+
 
 def get_daily_volatility(close: pd.Series, span: int = DEFAULT_VOLATILITY_SPAN) -> pd.Series:
-    """Volatilidad diaria estimada con EWMA de retornos simples (span=100
-    por defecto, convención habitual en AFML cap. 3).
+    """Volatilidad POR VELA estimada con EWMA de retornos simples (span=100
+    velas por defecto, convención habitual en AFML cap. 3, ahí pensada para
+    velas diarias — de ahí el nombre de la función; ver la nota de
+    "FRECUENCIA DE LAS VELAS" en el docstring del módulo).
 
     Se usa para escalar las barreras de `triple_barrier_labels` por la
-    volatilidad LOCAL de cada fecha, en vez de un umbral fijo que no se
+    volatilidad LOCAL de cada vela, en vez de un umbral fijo que no se
     adapta a los cambios de régimen del activo (un movimiento del 5% es
     "normal" en un período de alta volatilidad y "enorme" en uno de calma).
+    Sobre velas horarias, usar un `span` pensado para velas diarias
+    subestimaría fuertemente la memoria real deseada (100 horas son ~4 días,
+    no ~100) — ver `DEFAULT_VOLATILITY_SPAN_HOURLY`.
 
     `Series.ewm(span=span).std()` es trailing por construcción (solo usa
-    retornos hasta la fecha t para el valor en t) — sin lookahead. El primer
+    retornos hasta la vela t para el valor en t) — sin lookahead. El primer
     valor queda en NaN (con una sola observación, el desvío no está
     definido).
     """
@@ -51,19 +80,25 @@ def triple_barrier_labels(
     sl_mult: float = DEFAULT_SL_MULT,
     max_holding: int = DEFAULT_MAX_HOLDING,
 ) -> pd.DataFrame:
-    """Etiquetado triple-barrier: para cada fecha t (posible entrada LARGA —
+    """Etiquetado triple-barrier: para cada vela t (posible entrada LARGA —
     este etiquetado asume una posición compradora, no evalúa el lado corto),
     se definen tres barreras:
 
         take-profit = close_t * (1 + pt_mult * volatility_t)
         stop-loss   = close_t * (1 - sl_mult * volatility_t)
-        vertical    = t + max_holding días
+        vertical    = t + max_holding velas
 
-    Se recorre el futuro de t (SOLO dentro de la ventana `max_holding`) día
-    a día y se etiqueta según cuál barrera se toca PRIMERO (comparando
-    contra el CLOSE de cada día; con datos diarios no hay forma de saber el
-    orden intradía si dos barreras se cruzan el mismo día — en ese caso
-    empate se resuelve a favor de take-profit, ver el código).
+    `max_holding` cuenta VELAS del índice de `close`, no días de calendario
+    — con velas diarias son días (el caso original, Fase 3a); con velas
+    horarias (Fase 6c, `DEFAULT_MAX_HOLDING_HOURLY`) son horas. El mecanismo
+    es idéntico, puramente posicional (ver el código), así que no hace
+    falta ningún cambio para usarlo sobre cualquier frecuencia regular.
+
+    Se recorre el futuro de t (SOLO dentro de la ventana `max_holding`) vela
+    a vela y se etiqueta según cuál barrera se toca PRIMERO (comparando
+    contra el CLOSE de cada vela; sin datos intravela no hay forma de saber
+    el orden dentro de una misma vela si dos barreras se cruzan ahí — en ese
+    caso el empate se resuelve a favor de take-profit, ver el código).
 
     IMPORTANTE — ESTO MIRA EL FUTURO POR CONSTRUCCIÓN: es la etiqueta (la
     "y" del problema supervisado), nunca debe usarse como feature/input de
