@@ -1,4 +1,10 @@
-"""Tests offline para ml/features.py (OHLCV sintético, sin red)."""
+"""Tests offline para ml/features.py (OHLCV sintético, sin red).
+
+La excepción es el test de estacionariedad (Fase 6a): corre contra el
+snapshot local real de BTC (`source="store"`, sin red — mismo patrón que
+`tests/test_models.py`/`tests/test_app_smoke.py` para otras validaciones
+que necesitan datos reales, no sintéticos).
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from data.loaders import get_prices
+from eda.eda_report import adf_test
 from ml.features import align_features_labels, build_feature_matrix
 from ml.labeling import get_daily_volatility, triple_barrier_labels
 
@@ -43,14 +51,34 @@ def test_build_feature_matrix_has_expected_columns() -> None:
     df = _synthetic_ohlcv(n=250)
     features = build_feature_matrix(df)
 
-    expected_new_cols = {
+    expected_cols = {
         "ret_1", "ret_5", "ret_10", "ret_20", "vol_realizada_20", "vol_ewma",
-        "rsi_14", "macd", "macd_hist", "bb_pct_b", "bb_bandwidth", "atr_14",
+        "rsi_14", "bb_pct_b", "bb_bandwidth", "bb_zscore",
+        "dist_sma20", "dist_sma50", "ma_cross", "intraday_range", "body",
+        "atr_norm", "macd_norm", "macd_signal_norm", "macd_hist_norm", "rel_volume",
     }
-    assert expected_new_cols.issubset(set(features.columns))
+    assert set(features.columns) == expected_cols
     assert "vol_garch" not in features.columns  # removida por leakage, ver HOTFIX del módulo
-    assert set(df.columns).issubset(set(features.columns))
     assert "ret_1" not in df.columns  # no mutó el df original
+
+
+def test_build_feature_matrix_excludes_raw_non_stationary_price_levels() -> None:
+    """HOTFIX de Fase 6a: ningún nivel de precio crudo (ni en unidades de
+    precio absolutas) puede colarse como feature — ver el HOTFIX en el
+    docstring del módulo. Cubre tanto las columnas OHLCV originales como
+    los indicadores de `add_all_indicators` que están en unidades de
+    precio (reemplazados acá por sus versiones normalizadas/ratio).
+    """
+    df = _synthetic_ohlcv(n=250, seed=9)
+    features = build_feature_matrix(df)
+
+    raw_price_level_columns = {
+        "open", "high", "low", "close", "volume",
+        "sma_20", "sma_50", "ema_12", "ema_26",
+        "bb_mid", "bb_upper", "bb_lower", "atr_14",
+        "macd", "macd_signal", "macd_hist",
+    }
+    assert raw_price_level_columns.isdisjoint(set(features.columns))
 
 
 def test_build_feature_matrix_ret_columns_match_pct_change() -> None:
@@ -118,7 +146,8 @@ def test_build_feature_matrix_include_onchain_merges_onchain_features(monkeypatc
 
     assert "net_flow_zscore" in features.columns
     assert "mvrv_level" in features.columns
-    assert set(df.columns).issubset(set(features.columns))
+    assert "dist_sma20" in features.columns
+    assert set(df.columns).isdisjoint(set(features.columns))  # sin niveles OHLCV crudos, ver HOTFIX Fase 6a
 
 
 def test_build_feature_matrix_include_onchain_requires_asset() -> None:
@@ -173,6 +202,50 @@ def test_build_feature_matrix_has_no_lookahead_via_truncation_with_onchain(monke
         row_truncated = features_truncated.loc[cutoff_date]
 
         pd.testing.assert_series_equal(row_full, row_truncated, check_names=False, rtol=1e-6)
+
+
+# --------------------------------------------------------------------------
+# Estacionariedad (Fase 6a, HOTFIX del bug de niveles de precio crudos)
+# --------------------------------------------------------------------------
+
+# Features que, aunque acotadas por construcción, quedarían exceptuadas del
+# ADF estricto si alguna vez no lo pasaran (ninguna hoy: las 20 features de
+# build_feature_matrix pasan el ADF de sobra sobre BTC real — ver el test
+# de abajo). Se deja el mecanismo, vacío, para no tener que bajar el umbral
+# de significancia global si el día de mañana se agrega una feature acotada
+# con memoria muy larga que lo justifique — cualquier entrada acá debe
+# tener al lado la razón.
+_STATIONARITY_WHITELIST: set[str] = set()
+
+
+def test_build_feature_matrix_all_columns_are_stationary_on_real_btc_data() -> None:
+    """Validación OBLIGATORIA de Fase 6a: sobre BTC real (`source="store"`),
+    CADA columna de `build_feature_matrix` debe rechazar la hipótesis nula
+    de raíz unitaria del test Augmented Dickey-Fuller
+    (`eda.eda_report.adf_test`, reutilizado tal cual — no se reimplementa
+    el ADF acá) con p<0.05, salvo que esté en `_STATIONARITY_WHITELIST` con
+    una razón documentada.
+
+    Este es el test que hubiera detectado el bug de Fase 3a (niveles de
+    precio crudos como feature: `close`, `sma_20`, etc. — ver HOTFIX en el
+    docstring de `ml/features.py`): un nivel de precio tiene raíz unitaria
+    por construcción (es, a grandes rasgos, un random walk) y el ADF NO
+    rechazaría esa hipótesis nula (p-valor alto) — si alguna feature NO
+    estacionaria volviera a colarse acá, este test fallaría.
+    """
+    df = get_prices("BTC", source="store")
+    features = build_feature_matrix(df)
+
+    failures: list[tuple[str, float]] = []
+    for col in features.columns:
+        if col in _STATIONARITY_WHITELIST:
+            continue
+        series = features[col].dropna()
+        result = adf_test(series)
+        if not result["es_estacionaria"]:
+            failures.append((col, result["p_valor"]))
+
+    assert not failures, f"Columnas NO estacionarias según ADF (p>=0.05): {failures}"
 
 
 # --------------------------------------------------------------------------

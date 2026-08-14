@@ -30,6 +30,24 @@ momento de decidir). El problema es específicamente usarlo como FEATURE de
 entrenamiento sobre una serie histórica completa, donde "hoy" varía fila a
 fila pero el ajuste no. Ver `garch_feature_walkforward` más abajo para la
 alternativa causal (no implementada todavía).
+
+HOTFIX (Fase 6a, bug de raíz de Fase 3a): `build_feature_matrix` incluía 12
+NIVELES de precio crudos como feature —
+open/high/low/close/sma_20/sma_50/ema_12/ema_26/bb_mid/bb_upper/bb_lower/atr_14
+(más macd/macd_signal, en unidades de precio, aunque no eran niveles per
+se) — que NO son estacionarios: su escala absoluta crece con el precio del
+activo a lo largo de los años (p. ej. `close` pasó de ~$3.000 a ~$100.000
+en la historia de BTC). Un árbol de decisión (el modelo primario, Fase 3c)
+aprende reglas del tipo "si close > X entonces...", y ese umbral X, calibrado
+en un rango de precios de una época, no tiene ningún motivo para seguir
+siendo relevante en otra — no es lookahead (no mira el futuro), pero SÍ es
+un problema de generalización: el modelo memoriza el rango de precios visto
+en train en vez de aprender un patrón que se repita. Esto era consistente
+con el resultado nulo de Fase 3c/5b (el modelo no le ganaba a los baselines
+triviales). La corrección: ninguna feature de `build_feature_matrix` es ya
+un nivel de precio en unidades absolutas — todas son ratios, diferencias
+normalizadas o indicadores ya acotados (ver el detalle de cada una en
+`build_feature_matrix`), invariantes a la escala del precio.
 """
 
 from __future__ import annotations
@@ -51,64 +69,119 @@ _RETURN_LAGS: tuple[int, ...] = (1, 5, 10, 20)
 _REALIZED_VOL_WINDOW: int = 20
 
 
+_VOLUME_REL_WINDOW: int = 20
+
+
 def build_feature_matrix(
     df_ohlcv: pd.DataFrame, include_onchain: bool = False, asset: str | None = None
 ) -> pd.DataFrame:
     """Construye la matriz de features X a partir de un OHLCV estandarizado
     (el de `data.loaders.get_prices`). No modifica `df_ohlcv` in-place.
 
-    Reutiliza `signals.indicators.add_all_indicators` tal cual (agrega
-    sma_20/50, ema_12/26, rsi_14, macd/macd_signal/macd_hist,
-    bb_mid/upper/lower/pct_b/bandwidth/zscore, atr_14 — todos trailing por
-    construcción, ver ese módulo) y agrega:
+    Usa `signals.indicators.add_all_indicators` como INSUMO interno (todos
+    sus indicadores son trailing, ver ese módulo) pero NINGUNA de sus
+    columnas en unidades de precio absolutas queda como feature final — ver
+    el HOTFIX de Fase 6a en el docstring del módulo: la matriz que devuelve
+    esta función es SIEMPRE estacionaria/escala-invariante, columna por
+    columna. Las features son:
 
-    - "ret_1", "ret_5", "ret_10", "ret_20": retorno simple de los últimos
-      1/5/10/20 días (`close_t / close_{t-k} - 1`, vía `Series.pct_change`)
-      — momentum a distintos horizontes. Trailing: usa solo precios <= t.
+    Momentum y volatilidad (Fase 3a, sin cambios):
+    - "ret_1"/"ret_5"/"ret_10"/"ret_20": retorno simple de los últimos
+      1/5/10/20 días (`close_t / close_{t-k} - 1`, vía `Series.pct_change`).
     - "vol_realizada_20": desvío estándar rolling de 20 días de los
-      retornos simples (`signals.returns.simple_returns`), ANUALIZADO
-      (`* sqrt(config.PERIODS_PER_YEAR)`) — volatilidad reciente realizada,
-      trailing.
+      retornos simples, ANUALIZADO (`* sqrt(config.PERIODS_PER_YEAR)`).
     - "vol_ewma": volatilidad diaria vía EWMA de retornos
-      (`ml.labeling.get_daily_volatility`, span=`DEFAULT_VOLATILITY_SPAN`,
-      reutilizada tal cual, NO reimplementada acá) — una segunda medida de
-      volatilidad, con memoria más larga y suavizado exponencial en vez de
-      ventana rolling fija, pero igual de CAUSAL/trailing que
-      `vol_realizada_20`. Es el sustituto causal de la ex-feature
-      `vol_garch` (ver HOTFIX en el docstring del módulo): no captura
-      asimetría ni clustering tan bien como un GARCH, pero no tiene
-      leakage.
+      (`ml.labeling.get_daily_volatility`, span=`DEFAULT_VOLATILITY_SPAN`).
+
+    Osciladores ya acotados/estacionarios por construcción (Fase 3a, de
+    `add_all_indicators`, sin cambios): "rsi_14" (∈[0,100]), "bb_pct_b"
+    (posición relativa dentro de la banda), "bb_bandwidth" (ancho relativo
+    de la banda), "bb_zscore" (desvíos estándar respecto de la media móvil).
+
+    Transformaciones estacionarias de niveles (Fase 6a — reemplazan a los
+    niveles crudos, ver HOTFIX del módulo):
+    - "dist_sma20"/"dist_sma50" = `(close - sma) / sma`: distancia
+      PORCENTUAL del precio a su media móvil de 20/50 — el mismo valor
+      (p. ej. "5% por encima de la SMA20") significa lo mismo hoy que hace
+      cinco años, a diferencia del nivel crudo de la SMA.
+    - "ma_cross" = `(ema_12 - ema_26) / ema_26`: cruce de medias EMA
+      normalizado por el nivel de la EMA lenta — mismo gap relativo, sea
+      cual sea la escala de precio del momento (equivalente a la lógica de
+      "trend" de `signals.engine.compute_signal_components`, pero expuesto
+      acá como feature de ML en vez de componente de score).
+    - "intraday_range" = `(high - low) / close`: rango intradía como
+      fracción del precio de cierre — un proxy de volatilidad/actividad del
+      día, ya relativo.
+    - "body" = `(close - open) / open`: retorno intradía (apertura a
+      cierre) — mismo tipo de magnitud que `ret_1`, pero dentro del día.
+    - "atr_norm" = `atr_14 / close`: ATR (rango verdadero promedio, en
+      unidades de precio) normalizado por el precio actual — vuelve
+      comparable la volatilidad de rango entre épocas de precio distinto.
+    - "macd_norm"/"macd_signal_norm"/"macd_hist_norm" = cada componente del
+      MACD (en unidades de precio, porque es una diferencia de EMAs)
+      dividido por `close` — mismo racional que `atr_norm`.
+    - "rel_volume" = `volume / volume.rolling(20).mean()`: volumen del día
+      relativo a su propio promedio móvil reciente — un volumen "alto" o
+      "bajo" relativo a lo normal de ESE activo en ESE momento, en vez de
+      un número crudo cuya escala también cambia con la liquidez del
+      mercado a lo largo de los años.
+
+    Todas las transformaciones de arriba son TRAILING por construcción
+    (usan `close`/`open`/`high`/`low`/`volume` y los indicadores de
+    `add_all_indicators`, todos trailing, solo hasta la fecha t) — dividir
+    o restar dos cantidades de la misma fecha no introduce ningún
+    lookahead nuevo.
 
     Si `include_onchain=True` (Fase 5b), además mergea las features on-chain
     de `asset` (obligatorio en ese caso): `data.onchain.load_onchain` +
     `data.onchain.build_onchain_features` + `data.onchain.merge_onchain`,
     reutilizadas tal cual — no se reimplementa ningún cálculo on-chain acá.
-    Todas esas features ya son TRAILING/causales por construcción (ver
-    `data/onchain.py`), así que agregarlas no introduce ningún lookahead
-    nuevo. Si `asset` no tiene snapshot on-chain exportado (p. ej. SOL, ver
-    `data/onchain.py`), se loguea un warning y la matriz devuelta queda
-    IGUAL que con `include_onchain=False` — no se aborta, para que el
-    pipeline funcione de punta a punta incluso en activos sin cobertura
-    on-chain. Si el activo tiene cobertura PARCIAL (p. ej. BNB/LTC, sin
-    flujos de exchange), se agregan las que estén disponibles y se loguea
-    cuáles fueron.
+    Todas esas features ya son TRAILING/causales y estacionarias por
+    construcción (ver `data/onchain.py`). Si `asset` no tiene snapshot
+    on-chain exportado (p. ej. SOL, ver `data/onchain.py`), se loguea un
+    warning y la matriz devuelta queda IGUAL que con `include_onchain=False`
+    — no se aborta. Si el activo tiene cobertura PARCIAL (p. ej. BNB/LTC,
+    sin flujos de exchange), se agregan las que estén disponibles y se
+    loguea cuáles fueron.
 
-    Devuelve una copia de `df_ohlcv` con todas las columnas de
-    `add_all_indicators` más las agregadas acá (y las on-chain, si aplica).
-    Fuera de la cobertura on-chain (o si el activo no tiene), esas columnas
-    quedan en NaN — el warmup/alineación final es responsabilidad de
+    Devuelve un DataFrame con el mismo índice que `df_ohlcv` y SOLO las
+    columnas de feature descriptas arriba (más las on-chain, si aplica) —
+    a propósito, NUNCA las columnas OHLCV crudas ni los indicadores en
+    unidades de precio absolutas (ver HOTFIX de Fase 6a). El warmup de las
+    ventanas rolling (NaN al principio de la serie) es responsabilidad de
     `align_features_labels`, igual que con cualquier otra feature.
     """
-    out = add_all_indicators(df_ohlcv)
-    close = out["close"]
+    raw = add_all_indicators(df_ohlcv)
+    close = raw["close"]
+    open_ = raw["open"]
+    high = raw["high"]
+    low = raw["low"]
+    volume = raw["volume"]
+
+    out = pd.DataFrame(index=raw.index)
 
     for lag in _RETURN_LAGS:
         out[f"ret_{lag}"] = close.pct_change(periods=lag)
 
     realized_vol = simple_returns(close).rolling(window=_REALIZED_VOL_WINDOW).std(ddof=1)
     out["vol_realizada_20"] = realized_vol * np.sqrt(PERIODS_PER_YEAR)
-
     out["vol_ewma"] = get_daily_volatility(close, span=DEFAULT_VOLATILITY_SPAN)
+
+    out["rsi_14"] = raw["rsi_14"]
+    out["bb_pct_b"] = raw["bb_pct_b"]
+    out["bb_bandwidth"] = raw["bb_bandwidth"]
+    out["bb_zscore"] = raw["bb_zscore"]
+
+    out["dist_sma20"] = (close - raw["sma_20"]) / raw["sma_20"]
+    out["dist_sma50"] = (close - raw["sma_50"]) / raw["sma_50"]
+    out["ma_cross"] = (raw["ema_12"] - raw["ema_26"]) / raw["ema_26"]
+    out["intraday_range"] = (high - low) / close
+    out["body"] = (close - open_) / open_
+    out["atr_norm"] = raw["atr_14"] / close
+    out["macd_norm"] = raw["macd"] / close
+    out["macd_signal_norm"] = raw["macd_signal"] / close
+    out["macd_hist_norm"] = raw["macd_hist"] / close
+    out["rel_volume"] = volume / volume.rolling(window=_VOLUME_REL_WINDOW).mean()
 
     if include_onchain:
         if asset is None:
