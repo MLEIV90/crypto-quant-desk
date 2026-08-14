@@ -71,6 +71,31 @@ class PriceCanvas(_DarkCanvas):
         self.draw()
 
 
+class EquityCurveCanvas(_DarkCanvas):
+    """Curvas de equity (base 1.0) de la estrategia del engine vs. buy &
+    hold, ya calculadas por `app.workers.BacktestWorker` — solo dibuja.
+    """
+
+    def plot(self, resultado) -> None:
+        self.ax.clear()
+        self._style_axes()
+
+        self.ax.plot(
+            resultado.equity_curve_estrategia.index, resultado.equity_curve_estrategia.to_numpy(),
+            color=PRICE_LINE, linewidth=1.2, label="Estrategia (engine)",
+        )
+        self.ax.plot(
+            resultado.equity_curve_buy_and_hold.index, resultado.equity_curve_buy_and_hold.to_numpy(),
+            color=SMA_LINE, linewidth=1.2, label="Buy & hold",
+        )
+        self.ax.set_ylabel("Equity (base 1.0)")
+        self.ax.set_title(f"{resultado.asset} — equity: estrategia vs. buy & hold")
+        legend = self.ax.legend(loc="upper left", fontsize=8, facecolor=PANEL_BACKGROUND, edgecolor=BORDER)
+        for text in legend.get_texts():
+            text.set_color(TEXT_MUTED)
+        self.draw()
+
+
 class VolatilityCanvas(_DarkCanvas):
     """Volatilidad condicional GARCH en el tiempo, con el régimen ACTUAL
     (último día) resaltado según su color (calma/normal/tensión).

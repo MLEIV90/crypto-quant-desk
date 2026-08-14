@@ -78,4 +78,51 @@ QLabel#cardValue {{
     font-weight: bold;
     font-size: 10.5pt;
 }}
+QTabWidget::pane {{
+    border: 1px solid {BORDER};
+    background-color: {BACKGROUND};
+    top: -1px;
+}}
+QTabBar::tab {{
+    background-color: {PANEL_BACKGROUND};
+    color: {TEXT_MUTED};
+    padding: 8px 16px;
+    border: 1px solid {BORDER};
+    border-bottom: none;
+}}
+QTabBar::tab:selected {{
+    background-color: {BACKGROUND};
+    color: {ACCENT};
+    font-weight: bold;
+}}
+QLabel#honestyWarning {{
+    color: #fbbf24;
+    font-size: 8.5pt;
+    font-style: italic;
+    padding: 6px;
+    border: 1px solid #fbbf24;
+    border-radius: 4px;
+}}
+QLabel#accionLabel {{
+    font-size: 14pt;
+    font-weight: bold;
+}}
+QLabel#semaforoDot {{
+    padding-right: 4px;
+}}
+QTableWidget {{
+    background-color: {PANEL_BACKGROUND};
+    color: {TEXT};
+    gridline-color: {BORDER};
+    border: 1px solid {BORDER};
+}}
+QTableWidget::item {{
+    padding: 4px;
+}}
+QHeaderView::section {{
+    background-color: {BACKGROUND};
+    color: {TEXT_MUTED};
+    padding: 4px;
+    border: 1px solid {BORDER};
+}}
 """
