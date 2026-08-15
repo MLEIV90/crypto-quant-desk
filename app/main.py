@@ -3,13 +3,22 @@
 Solo arma la UI y orquesta a los workers de `app.workers`: dispara
 `AnalysisWorker` al hacer clic en "Analizar" y, cuando termina (por señal,
 nunca por espera bloqueante), vuelca su `AnalysisResult` a los widgets de
-gráficos, al panel de riesgo (pestaña "Riesgo", Fase 4a) y al panel de
-señales (pestaña "Señales", Fase 4b) — mismo resultado, dos vistas, un solo
-cómputo. Las pestañas "Backtest" (Fase 4b) y "Predicción (ML)" (Fase 5b)
-son independientes: cada una tiene su propio selector/botón porque dispara
-su propio worker (`BacktestWorker`/`PredictionWorker`), un cómputo aparte
-del análisis de riesgo/señales. Ningún cálculo de negocio vive acá — ver
-`app/__init__.py` para la regla de separación modelo/vista.
+gráficos y al panel de riesgo (pestaña "Riesgo", Fase 4a). Las pestañas
+"Análisis Técnico" (Fase 7b), "Backtest" (Fase 4b) y "Research (sin edge)"
+(Fase 5b) son independientes: cada una tiene su propio selector/botón
+porque dispara su propio worker (`StudiesWorker`/`BacktestWorker`/
+`PredictionWorker`), un cómputo aparte del análisis de riesgo. Ningún
+cálculo de negocio vive acá — ver `app/__init__.py` para la regla de
+separación modelo/vista.
+
+CONSOLIDACIÓN DE PESTAÑAS (Fase 7b): la vieja pestaña "Señales" (Fase 4b,
+el semáforo LONG/FLAT/SHORT del engine de `signals.engine`) se REEMPLAZÓ
+por "Análisis Técnico" (más completa: gráfico de velas + estudios +
+sugeridor de consenso, con su propio desempeño histórico siempre visible).
+La pestaña "Predicción (ML)" (Fase 5b) se renombró "Research (sin edge)" y
+se movió al final — nunca tuvo un modelo con edge demostrado, así que no
+debe convivir con las herramientas operativas como si lo tuviera (ver
+`app.widgets.prediction_panel` para el detalle de esta decisión).
 """
 
 from __future__ import annotations
@@ -37,7 +46,7 @@ from app.widgets.backtest_panel import BacktestPanel  # noqa: E402
 from app.widgets.plot_canvas import PriceCanvas, VolatilityCanvas  # noqa: E402
 from app.widgets.prediction_panel import PredictionPanel  # noqa: E402
 from app.widgets.risk_panel import RiskPanel  # noqa: E402
-from app.widgets.signals_panel import SignalsPanel  # noqa: E402
+from app.widgets.technical_analysis_panel import TechnicalAnalysisPanel  # noqa: E402
 from app.workers import AnalysisWorker  # noqa: E402
 from config import UNIVERSE  # noqa: E402
 
@@ -108,14 +117,14 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_risk_tab(), "Riesgo")
 
-        self.signals_panel = SignalsPanel()
-        self.tabs.addTab(self.signals_panel, "Señales")
+        self.technical_analysis_panel = TechnicalAnalysisPanel()
+        self.tabs.addTab(self.technical_analysis_panel, "Análisis Técnico")
 
         self.backtest_panel = BacktestPanel()
         self.tabs.addTab(self.backtest_panel, "Backtest")
 
         self.prediction_panel = PredictionPanel()
-        self.tabs.addTab(self.prediction_panel, "Predicción (ML)")
+        self.tabs.addTab(self.prediction_panel, "Research (sin edge)")
 
         return self.tabs
 
@@ -162,12 +171,10 @@ class MainWindow(QMainWindow):
         self.price_canvas.plot(resultado)
         self.vol_canvas.plot(resultado)
         self.risk_panel.update_values(resultado)
-        self.signals_panel.update_values(resultado)
 
     def _on_analysis_error(self, mensaje: str) -> None:
         self.status_label.setText("Error en el análisis.")
         self.risk_panel.reset()
-        self.signals_panel.reset()
         QMessageBox.critical(self, "Error al analizar", mensaje)
 
     def _on_worker_finished(self) -> None:

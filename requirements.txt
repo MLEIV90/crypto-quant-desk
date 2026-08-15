@@ -13,3 +13,4 @@ arch>=6.3
 scikit-learn>=1.3
 xgboost>=2.0
 PySide6>=6.5
+mplfinance>=0.12

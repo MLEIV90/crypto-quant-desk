@@ -4,12 +4,13 @@ verifica que no explota. NO testea interacción real (clicks, threads) — eso
 requeriría un entorno gráfico real; acá solo se confirma que la UI se arma
 sin excepciones y que los selectores/pestañas están bien poblados.
 
-La excepción son `BacktestWorker` (Fase 4b) y `PredictionWorker` (Fase 5b):
-SÍ se corren directamente (sin UI ni `QThread.start()`, como ya se hacía
-para validar `AnalysisWorker`) sobre un activo real (`source="store"`),
-para confirmar que sus resultados tienen las claves que pintan
-`BacktestPanel`/`PredictionPanel` — esto sí pega contra datos reales
-(locales, del snapshot), no es un test puramente offline de UI.
+La excepción son `BacktestWorker` (Fase 4b), `PredictionWorker` (Fase 5b) y
+`StudiesWorker` (Fase 7b): SÍ se corren directamente (sin UI ni
+`QThread.start()`, como ya se hacía para validar `AnalysisWorker`) sobre un
+activo real (`source="store"`), para confirmar que sus resultados tienen
+las claves que pintan `BacktestPanel`/`PredictionPanel`/
+`TechnicalAnalysisPanel` — esto sí pega contra datos reales (locales, del
+snapshot), no es un test puramente offline de UI.
 """
 
 from __future__ import annotations
@@ -90,24 +91,36 @@ def test_cockpit_has_the_four_tabs(qapp) -> None:
     window = MainWindow()
     tabs = [window.tabs.tabText(i) for i in range(window.tabs.count())]
 
-    assert tabs == ["Riesgo", "Señales", "Backtest", "Predicción (ML)"]
+    assert tabs == ["Riesgo", "Análisis Técnico", "Backtest", "Research (sin edge)"]
     window.close()
 
 
-def test_signals_panel_has_semaforo_and_honesty_warning(qapp) -> None:
+def test_technical_analysis_panel_has_selectors_and_honesty_warning(qapp) -> None:
+    from PySide6.QtWidgets import QLabel
+
     from app.main import MainWindow
-    from app.widgets.signals_panel import HONESTY_TEXT
+    from app.widgets.technical_analysis_panel import HONESTY_TEXT, TIMEFRAMES
+    from config import UNIVERSE
 
     window = MainWindow()
-    panel = window.signals_panel
+    panel = window.technical_analysis_panel
 
-    assert panel.accion_label.text() == "—"
-    for label in panel._value_labels.values():
-        assert label.text() == "—"
+    asset_items = [panel.asset_combo.itemText(i) for i in range(panel.asset_combo.count())]
+    assert set(asset_items) == set(UNIVERSE.keys())
 
-    warning_label = panel.findChild(type(panel.accion_label), "honestyWarning")
+    timeframe_items = [panel.timeframe_combo.itemText(i) for i in range(panel.timeframe_combo.count())]
+    assert timeframe_items == [label for label, _ in TIMEFRAMES]
+
+    assert panel.analyze_button.text() == "Analizar"
+
+    warning_label = panel.findChild(QLabel, "honestyWarning")
     assert warning_label is not None
     assert warning_label.text() == HONESTY_TEXT
+
+    # El panel del sugeridor arranca vacío.
+    assert panel.suggester_panel.suggestion_label.text() == "—"
+    for label in panel.suggester_panel._detail_labels.values():
+        assert label.text() == "—"
     window.close()
 
 
@@ -188,3 +201,52 @@ def test_prediction_worker_returns_expected_fields_on_real_data() -> None:
     assert isinstance(resultado.supera_azar, bool)
     assert isinstance(resultado.supera_mayoritaria, bool)
     assert len(resultado.top_features) > 0
+
+
+def test_studies_worker_returns_expected_fields_on_real_data() -> None:
+    """Corre `StudiesWorker._compute` directo (sin QThread ni UI) sobre BTC
+    diario real y verifica que el resultado tiene todo lo que pintan
+    `TechnicalChartCanvas`/`SuggesterPanel`: estudios (Fase 7a) + sugerencia
+    de consenso, con su desempeño histórico siempre presente.
+    """
+    from app.workers import StudiesWorker
+
+    worker = StudiesWorker("BTC", "1d")
+    resultado = worker._compute("BTC", "1d")
+
+    assert resultado.asset == "BTC"
+    assert resultado.timeframe == "1d"
+    assert list(resultado.ohlcv_recent.columns) == ["Open", "High", "Low", "Close", "Volume"]
+    assert len(resultado.ohlcv_recent) > 0
+
+    for series in (
+        resultado.sma_20, resultado.sma_50, resultado.ema_12, resultado.ema_26,
+        resultado.bb_upper, resultado.bb_mid, resultado.bb_lower, resultado.rsi_14,
+        resultado.macd, resultado.macd_signal, resultado.macd_hist,
+        resultado.stoch_k, resultado.stoch_d,
+    ):
+        assert series.index.equals(resultado.ohlcv_recent.index)
+
+    assert set(resultado.pivotes.keys()) == {"P", "R1", "R2", "R3", "S1", "S2", "S3"}
+    assert set(resultado.soporte_resistencia.keys()) == {"resistencia", "soporte", "precio_actual"}
+
+    sugerencia = resultado.sugerencia
+    assert sugerencia["sugerencia"] in {"COMPRAR", "VENDER", "ESPERAR"}
+    assert set(sugerencia["desempeno_historico"].keys()) == {
+        "cagr_sugeridor", "sharpe_sugeridor", "max_drawdown_sugeridor", "n_trades_sugeridor",
+        "cagr_buy_and_hold", "sharpe_buy_and_hold", "max_drawdown_buy_and_hold",
+    }
+
+
+def test_studies_worker_works_on_hourly_timeframe_too() -> None:
+    """Mismo worker, timeframe horario (Fase 6b) — confirma que el recorte
+    a la ventana reciente (`TECHNICAL_CHART_RECENT_CANDLES`) funciona igual
+    de bien sobre 58.000 velas horarias que sobre ~3.000 diarias.
+    """
+    from app.workers import TECHNICAL_CHART_RECENT_CANDLES, StudiesWorker
+
+    worker = StudiesWorker("ETH", "1h")
+    resultado = worker._compute("ETH", "1h")
+
+    assert resultado.timeframe == "1h"
+    assert len(resultado.ohlcv_recent) == TECHNICAL_CHART_RECENT_CANDLES

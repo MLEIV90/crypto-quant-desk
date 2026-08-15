@@ -1,7 +1,16 @@
-"""Pestaña "Predicción (ML)": corre el modelo primario (Fase 3c) — enriquecido
-con on-chain para BTC/ETH (Fase 5b) — en un `QThread`
+"""Pestaña "Research (sin edge)": corre el modelo primario (Fase 3c) —
+enriquecido con on-chain para BTC/ETH (Fase 5b) — en un `QThread`
 (`app.workers.PredictionWorker`) y muestra la predicción OOS más reciente,
 si le gana o no a los baselines triviales, y qué features pesan más.
+
+CONSOLIDACIÓN DE FASE 7b: esta pestaña era "Predicción (ML)" y vivía en la
+barra principal del cockpit. Se movió acá, al final, y se renombró
+explícitamente porque el proyecto NUNCA encontró un modelo que le gane de
+forma consistente a los baselines triviales (ver `ml/models.py`,
+Fases 3c/5b/6a/6c) — mantenerla junto a herramientas operativas (Riesgo,
+Backtest, Análisis Técnico) sugeriría un edge que no existe. Es
+investigación con resultado negativo, documentada con la misma honestidad
+que el resto del proyecto — no una herramienta para operar.
 
 Tiene su propio selector de activo y botón (independiente del de arriba,
 igual que `BacktestPanel`), porque dispara un cómputo propio (varios
@@ -26,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.widgets.signals_panel import SEMAFORO_COLORS
+from app.theme import DIRECTION_COLORS
 from app.workers import ONCHAIN_ENABLED_ASSETS, PredictionWorker
 from config import UNIVERSE
 
@@ -36,11 +45,13 @@ DISCLAIMER_TEXT = (
 )
 
 HONESTY_TEXT = (
-    "Predicción OOS (out-of-sample, validación purgeada — nunca vio la fecha que predice) "
-    "del modelo primario de ML. Para BTC/ETH usa features técnicas + on-chain (flujos de "
-    "exchange, MVRV, direcciones activas); para SOL/BNB/LTC, solo técnicas — sin cobertura "
-    "on-chain suficiente en CoinMetrics. Se muestra tal cual sale, incluso cuando el modelo "
-    "NO le gana a los baselines triviales — no es una recomendación de operar."
+    "INVESTIGACIÓN CON RESULTADO NEGATIVO, NO HERRAMIENTA OPERATIVA: este modelo de ML "
+    "NUNCA superó de forma consistente a los baselines triviales (azar / clase mayoritaria) "
+    "en ninguna validación del proyecto. Predicción OOS (out-of-sample, validación purgeada — "
+    "nunca vio la fecha que predice) del modelo primario. Para BTC/ETH usa features técnicas + "
+    "on-chain (flujos de exchange, MVRV, direcciones activas); para SOL/BNB/LTC, solo técnicas — "
+    "sin cobertura on-chain suficiente en CoinMetrics. Se muestra tal cual sale, sin maquillar — "
+    "no es una recomendación de operar."
 )
 
 _CLASS_ORDER = ["LONG", "FLAT", "SHORT"]
@@ -86,7 +97,7 @@ class PredictionPanel(QWidget):
         semaforo_row = QHBoxLayout()
         self.semaforo_dot = QLabel("●")
         self.semaforo_dot.setObjectName("semaforoDot")
-        self.semaforo_dot.setStyleSheet(_SEMAFORO_STYLE.format(color=SEMAFORO_COLORS["FLAT"]))
+        self.semaforo_dot.setStyleSheet(_SEMAFORO_STYLE.format(color=DIRECTION_COLORS["FLAT"]))
         semaforo_row.addWidget(self.semaforo_dot)
 
         self.clase_label = QLabel("—")
@@ -171,7 +182,7 @@ class PredictionPanel(QWidget):
         self.fecha_label.setText(f"({resultado.ultima_fecha.date()})")
 
         self.clase_label.setText(f"{resultado.prediccion_clase}  ({resultado.prediccion_confianza:.1%} conf.)")
-        color = SEMAFORO_COLORS.get(resultado.prediccion_clase, SEMAFORO_COLORS["FLAT"])
+        color = DIRECTION_COLORS.get(resultado.prediccion_clase, DIRECTION_COLORS["FLAT"])
         self.semaforo_dot.setStyleSheet(_SEMAFORO_STYLE.format(color=color))
 
         for clase in _CLASS_ORDER:

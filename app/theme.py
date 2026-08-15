@@ -22,6 +22,39 @@ REGIME_COLORS: dict[str, str] = {
 }
 REGIME_COLOR_DEFAULT = "#94a3b8"
 
+# Colores de dirección: LONG/COMPRAR = verde, FLAT/ESPERAR = gris, SHORT/VENDER
+# = rojo — un solo mapeo para el semáforo de predicción (Fase 5b, valores
+# LONG/FLAT/SHORT) y el sugeridor de consenso (Fase 7b, valores
+# COMPRAR/VENDER/ESPERAR), para que ambos usen exactamente la misma paleta.
+DIRECTION_COLORS: dict[str, str] = {
+    "LONG": "#22c55e", "COMPRAR": "#22c55e",
+    "FLAT": "#94a3b8", "ESPERAR": "#94a3b8",
+    "SHORT": "#ef4444", "VENDER": "#ef4444",
+}
+DIRECTION_COLOR_DEFAULT = "#94a3b8"
+
+# Paleta del panel de Análisis Técnico (Fase 7b): un color por línea/estudio
+# superpuesto en el gráfico de velas, elegidos para distinguirse entre sí y
+# del celeste/naranja ya usados en el resto del cockpit.
+CANDLE_UP = "#22c55e"
+CANDLE_DOWN = "#ef4444"
+SMA20_LINE = "#f59e0b"
+SMA50_LINE = "#eab308"
+EMA12_LINE = "#38bdf8"
+EMA26_LINE = "#818cf8"
+BOLLINGER_LINE = "#a78bfa"
+FIBONACCI_LINE = "#fbbf24"
+SUPPORT_LINE = "#22c55e"
+RESISTANCE_LINE = "#ef4444"
+PIVOT_LINE = "#e2e8f0"
+RSI_LINE = "#38bdf8"
+MACD_LINE = "#38bdf8"
+MACD_SIGNAL_LINE = "#f59e0b"
+MACD_HIST_UP = "#22c55e"
+MACD_HIST_DOWN = "#ef4444"
+STOCH_K_LINE = "#38bdf8"
+STOCH_D_LINE = "#f59e0b"
+
 STYLESHEET = f"""
 QMainWindow, QWidget {{
     background-color: {BACKGROUND};
@@ -124,5 +157,17 @@ QHeaderView::section {{
     color: {TEXT_MUTED};
     padding: 4px;
     border: 1px solid {BORDER};
+}}
+QWidget#suggesterPanel {{
+    background-color: {PANEL_BACKGROUND};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+}}
+QLabel#performanceHighlight {{
+    background-color: {BACKGROUND};
+    border: 1px solid {ACCENT};
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 9pt;
 }}
 """

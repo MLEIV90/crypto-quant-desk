@@ -10,11 +10,17 @@ la ventana principal dibuja, ver `app/__init__.py`).
 - `BacktestWorker` (Fase 4b): backtest de la estrategia del engine vs. buy &
   hold para el panel de backtest.
 - `PredictionWorker` (Fase 5b): predicción OOS del modelo primario de ML
-  (enriquecido con on-chain para BTC/ETH) para la pestaña "Predicción (ML)".
+  (enriquecido con on-chain para BTC/ETH) para la pestaña "Research (sin edge)"
+  (movida ahí en Fase 7b — ver `app.widgets.prediction_panel`).
+- `StudiesWorker` (Fase 7b): corre `signals.studies.all_studies` +
+  `signals.suggester.suggest` para la pestaña "Análisis Técnico", más las
+  series completas de indicadores/estudios (recortadas a una ventana
+  reciente) que necesita el gráfico de velas.
 
 Ninguno reimplementa cálculos: cada paso es una llamada directa a una
 función ya existente del backend (`data.loaders.get_prices`,
-`signals.returns`, `signals.engine`, `models.garch`, `metrics.risk_measures`,
+`signals.returns`, `signals.engine`, `signals.indicators`, `signals.studies`,
+`signals.suggester`, `models.garch`, `metrics.risk_measures`,
 `backtest.engine`, `ml.features`, `ml.labeling`, `ml.models`).
 """
 
@@ -34,7 +40,10 @@ from ml.labeling import get_daily_volatility, triple_barrier_labels
 from ml.models import evaluate_primary_with_roc_auc, feature_importances, fit_final, latest_oos_prediction, t1_from_labels
 from models.garch import conditional_volatility, select_best_model, volatility_regime
 from signals.engine import generate_positions, latest_recommendation
+from signals.indicators import add_all_indicators
 from signals.returns import log_returns, simple_returns
+from signals.studies import all_studies, stochastic
+from signals.suggester import suggest
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +73,6 @@ class AnalysisResult:
     accion: str
     score: float
     tamano_sugerido: float
-    desglose: dict[str, float]
     ultima_fecha: pd.Timestamp
 
 
@@ -139,7 +147,6 @@ class AnalysisWorker(QThread):
             accion=str(recomendacion["accion"]),
             score=float(recomendacion["score"]),
             tamano_sugerido=float(recomendacion["tamaño_sugerido"]),
-            desglose=dict(recomendacion["desglose"]),
             ultima_fecha=close.index[-1],
         )
 
@@ -334,4 +341,128 @@ class PredictionWorker(QThread):
             supera_mayoritaria=evaluacion["supera_mayoritaria"],
             roc_auc_media=evaluacion["roc_auc_media"],
             top_features=top_features,
+        )
+
+
+# Cantidad de velas recientes que se muestran en el gráfico de la pestaña
+# "Análisis Técnico" — mostrar TODA la historia (miles de velas diarias,
+# decenas de miles horarias, ver Fase 6b) sería ilegible; los estudios en
+# sí (RSI, MACD, soporte/resistencia, sugeridor, etc.) SÍ se calculan sobre
+# toda la historia disponible, esto solo recorta lo que se DIBUJA.
+TECHNICAL_CHART_RECENT_CANDLES = 250
+
+_MPLFINANCE_COLUMNS: dict[str, str] = {
+    "open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume",
+}
+
+
+@dataclass
+class StudiesResult:
+    """Todo lo que necesita `app.widgets.technical_analysis_panel.TechnicalAnalysisPanel`
+    para pintar la pestaña "Análisis Técnico" — ver `StudiesWorker._compute`.
+
+    `ohlcv_recent` y las series de indicadores ya vienen recortadas a las
+    últimas `TECHNICAL_CHART_RECENT_CANDLES` velas (mismo índice en todas,
+    para poder graficarlas juntas sin reindexar en la UI) — pero calculadas
+    sobre la historia COMPLETA primero (ningún indicador se calcula "en
+    aislado" sobre la ventana recortada, eso rompería el warmup de medias
+    largas como SMA50).
+    """
+
+    asset: str
+    timeframe: str
+    ohlcv_recent: pd.DataFrame  # columnas Open/High/Low/Close/Volume (mplfinance)
+    sma_20: pd.Series
+    sma_50: pd.Series
+    ema_12: pd.Series
+    ema_26: pd.Series
+    bb_upper: pd.Series
+    bb_mid: pd.Series
+    bb_lower: pd.Series
+    rsi_14: pd.Series
+    macd: pd.Series
+    macd_signal: pd.Series
+    macd_hist: pd.Series
+    stoch_k: pd.Series
+    stoch_d: pd.Series
+    fibonacci: dict[str, float] | None
+    soporte_resistencia: dict
+    pivotes: dict[str, float]
+    sugerencia: dict
+    ultima_fecha: pd.Timestamp
+
+
+class StudiesWorker(QThread):
+    """Ejecuta, en un hilo separado, `signals.studies.all_studies` +
+    `signals.suggester.suggest` (Fase 7a) para un activo/timeframe, más las
+    series de indicadores recortadas a una ventana reciente para el
+    gráfico de velas de la pestaña "Análisis Técnico" (Fase 7b).
+
+    No reimplementa NINGÚN cálculo: cada estudio es una llamada directa a
+    `signals.indicators`/`signals.studies`/`signals.suggester`, reutilizados
+    tal cual. Mismo patrón que el resto de los workers: señales
+    `resultado_listo(object)` / `error(str)`, se arranca con `.start()`.
+    """
+
+    resultado_listo = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, asset: str, timeframe: str = "1d", parent=None) -> None:
+        super().__init__(parent)
+        self.asset = asset
+        self.timeframe = timeframe
+
+    def run(self) -> None:
+        try:
+            resultado = self._compute(self.asset, self.timeframe)
+        except Exception as exc:  # noqa: BLE001 - cualquier falla debe llegar a la UI como mensaje, no como crash
+            logger.exception("StudiesWorker: falló el análisis técnico de %s (%s)", self.asset, self.timeframe)
+            self.error.emit(f"No se pudo analizar {self.asset} ({self.timeframe}): {exc}")
+            return
+        self.resultado_listo.emit(resultado)
+
+    def _compute(self, asset: str, timeframe: str) -> StudiesResult:
+        # 1) Precios del timeframe elegido (Fase 6b: source="store" ya
+        #    resuelve interval="1d"/"1h" al parquet correspondiente).
+        df = get_prices(asset, source="store", interval=timeframe)
+
+        # 2) Indicadores/estudios sobre la historia COMPLETA (Fase 7a,
+        #    reutilizados tal cual) — el resumen de la última vela y la
+        #    sugerencia de consenso miran toda la historia disponible.
+        indicators_df = add_all_indicators(df)
+        stoch_df = stochastic(df["high"], df["low"], df["close"])
+        resumen = all_studies(df)
+        sugerencia = suggest(df)
+
+        # 3) Recorte SOLO para lo que se dibuja (Fase 7b): las últimas
+        #    TECHNICAL_CHART_RECENT_CANDLES velas, ya con los indicadores
+        #    calculados sobre toda la historia (no hay warmup roto por el
+        #    recorte).
+        recent = df.tail(TECHNICAL_CHART_RECENT_CANDLES)
+        recent_indicators = indicators_df.loc[recent.index]
+        recent_stoch = stoch_df.loc[recent.index]
+        ohlcv_recent = recent.rename(columns=_MPLFINANCE_COLUMNS)[list(_MPLFINANCE_COLUMNS.values())]
+
+        return StudiesResult(
+            asset=asset,
+            timeframe=timeframe,
+            ohlcv_recent=ohlcv_recent,
+            sma_20=recent_indicators["sma_20"],
+            sma_50=recent_indicators["sma_50"],
+            ema_12=recent_indicators["ema_12"],
+            ema_26=recent_indicators["ema_26"],
+            bb_upper=recent_indicators["bb_upper"],
+            bb_mid=recent_indicators["bb_mid"],
+            bb_lower=recent_indicators["bb_lower"],
+            rsi_14=recent_indicators["rsi_14"],
+            macd=recent_indicators["macd"],
+            macd_signal=recent_indicators["macd_signal"],
+            macd_hist=recent_indicators["macd_hist"],
+            stoch_k=recent_stoch["stoch_k"],
+            stoch_d=recent_stoch["stoch_d"],
+            fibonacci=resumen["fibonacci"],
+            soporte_resistencia=resumen["soporte_resistencia"],
+            pivotes=resumen["pivotes"],
+            sugerencia=sugerencia,
+            ultima_fecha=df.index[-1],
         )
