@@ -1,0 +1,33 @@
+/* Reset mínimo + tema oscuro base (mismos colores que app/theme.py, la
+   terminal de escritorio) — el pulido visual completo es Fase 8c, esto
+   solo evita que la Fase 8b arranque sobre el CSS de marketing por
+   defecto de Vite. */
+
+:root {
+  color-scheme: dark;
+  --bg: #0f172a;
+  --panel-bg: #1e293b;
+  --border: #334155;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --accent: #38bdf8;
+  --danger: #ef4444;
+
+  font-family: "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#root {
+  min-height: 100vh;
+}
