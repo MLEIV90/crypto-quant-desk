@@ -3,8 +3,11 @@ REALES del snapshot local (`source="store"`, sin red — mismo patrón que el
 resto del proyecto: `tests/test_models.py`, `tests/test_app_smoke.py`).
 
 `/api/risk` y `/api/garch-series` ajustan un modelo GARCH por request (ver
-el docstring de rendimiento en `api/main.py`) — son los tests más lentos de
-este archivo, no es un problema del test, es inherente al endpoint.
+el docstring de rendimiento en `api/main.py`) — son tests lentos, no es un
+problema del test, es inherente al endpoint. `/api/prediction` (Fase 8c)
+es el MÁS lento de todos (entrena XGBoost con validación purgeada) — se
+usa SOL a propósito (solo técnicas, sin on-chain) para que el test no
+tarde más de lo necesario.
 """
 
 from __future__ import annotations
@@ -193,6 +196,39 @@ def test_get_garch_series_returns_series() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/prediction (Fase 8c, EL MÁS LENTO: entrena XGBoost con validación purgeada)
+# --------------------------------------------------------------------------
+
+
+def test_get_prediction_returns_expected_fields_without_onchain() -> None:
+    # SOL a propósito: sin cobertura on-chain (más rápido que BTC/ETH), ver
+    # docstring del módulo.
+    response = client.get("/api/prediction", params={"asset": "SOL"})
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["asset"] == "SOL"
+    assert body["used_onchain"] is False
+    assert body["onchain_columns"] == []
+    assert body["prediccion_clase"] in {"LONG", "FLAT", "SHORT"}
+    assert 0.0 <= body["prediccion_confianza"] <= 1.0
+    assert set(body["prediccion_proba"].keys()) == {"LONG", "FLAT", "SHORT"}
+    assert sum(body["prediccion_proba"].values()) == pytest.approx(1.0, abs=1e-6)
+    assert isinstance(body["supera_azar"], bool)
+    assert isinstance(body["supera_mayoritaria"], bool)
+    assert len(body["top_features"]) > 0
+    # cada feature es un par [nombre, importancia]
+    assert len(body["top_features"][0]) == 2
+
+
+def test_get_prediction_unknown_asset_returns_404() -> None:
+    response = client.get("/api/prediction", params={"asset": "DOGE"})
+
+    assert response.status_code == 404
+
+
+# --------------------------------------------------------------------------
 # Documentación automática (Swagger/OpenAPI)
 # --------------------------------------------------------------------------
 
@@ -206,5 +242,5 @@ def test_docs_and_openapi_schema_are_available() -> None:
     paths = openapi_response.json()["paths"]
     assert set(paths.keys()) == {
         "/api/assets", "/api/ohlcv", "/api/studies", "/api/suggester",
-        "/api/risk", "/api/backtest", "/api/garch-series",
+        "/api/risk", "/api/backtest", "/api/garch-series", "/api/prediction",
     }

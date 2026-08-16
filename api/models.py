@@ -152,3 +152,28 @@ class GarchSeriesResponse(BaseModel):
     vol_condicional: list[float | None]
     modelo_garch: str
     regimen_actual: str | None
+
+
+class PredictionResponse(BaseModel):
+    """Respuesta de `GET /api/prediction` — INVESTIGACIÓN CON RESULTADO
+    NEGATIVO, no una herramienta operativa: el modelo primario de ML nunca
+    superó de forma consistente a los baselines triviales en ninguna
+    validación del proyecto (ver `ml/models.py`, Fases 3c/5b/6a/6c). Se
+    expone tal cual sale, sin maquillar, igual que en la pestaña
+    "Research (sin edge)" de la app de escritorio.
+    """
+
+    asset: str
+    used_onchain: bool = Field(description="True solo para BTC/ETH, ver data/onchain.py")
+    onchain_columns: list[str]
+    ultima_fecha: datetime
+    prediccion_clase: str = Field(description="LONG / FLAT / SHORT")
+    prediccion_confianza: float = Field(description="Probabilidad OOS de la clase predicha, en [0, 1]")
+    prediccion_proba: dict[str, float]
+    accuracy_media: float
+    baseline_azar: float
+    baseline_mayoritaria: float
+    supera_azar: bool
+    supera_mayoritaria: bool
+    roc_auc_media: float
+    top_features: list[tuple[str, float]]

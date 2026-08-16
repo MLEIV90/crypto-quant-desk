@@ -1,21 +1,33 @@
-/* Reset mínimo + tema oscuro base (mismos colores que app/theme.py, la
-   terminal de escritorio) — el pulido visual completo es Fase 8c, esto
-   solo evita que la Fase 8b arranque sobre el CSS de marketing por
-   defecto de Vite. */
+/* Reset mínimo + tipografía base. Los COLORES viven en theme.ts (única
+   fuente de verdad, ver ese archivo) y se inyectan acá como variables CSS
+   (`--color-*`) desde `main.tsx`, antes del primer render — este archivo y
+   App.css solo los CONSUMEN vía var(--color-...), nunca repiten un hex a
+   mano. */
 
 :root {
   color-scheme: dark;
-  --bg: #0f172a;
-  --panel-bg: #1e293b;
-  --border: #334155;
-  --text: #e2e8f0;
-  --text-muted: #94a3b8;
-  --accent: #38bdf8;
-  --danger: #ef4444;
 
-  font-family: "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+  /* Escala de espaciado — no depende de theme.ts (nada que compartir con
+     lightweight-charts), se define acá directo. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.25);
+
+  font-family:
+    "Segoe UI",
+    "Helvetica Neue",
+    system-ui,
+    sans-serif;
   font-size: 15px;
-  line-height: 1.45;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 * {
@@ -24,10 +36,21 @@
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--color-background);
+  color: var(--color-text);
 }
 
 #root {
   min-height: 100vh;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+a {
+  color: var(--color-accent);
 }

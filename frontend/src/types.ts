@@ -1,13 +1,12 @@
 /**
  * Tipos TypeScript que reflejan los esquemas Pydantic de la API
- * (`api/models.py`, Fase 8a) — un tipo por respuesta que consume este
- * frontend. Fase 8b solo necesita `/api/assets`, `/api/ohlcv` y
- * `/api/studies`; el resto de los endpoints (`/api/suggester`, `/api/risk`,
- * `/api/backtest`, `/api/garch-series`) se tipan cuando se consuman en 8c.
+ * (`api/models.py`, Fases 8a/8c) — un tipo por respuesta que consume este
+ * frontend.
  *
  * Convención: fechas llegan como string ISO 8601 UTC (p. ej.
  * "2026-08-12T00:00:00Z") — se parsean recién donde hace falta un
- * timestamp numérico (ver `components/Chart.tsx`), nunca acá.
+ * timestamp numérico (ver `components/Chart.tsx`/`components/LineChartPanel.tsx`),
+ * nunca acá.
  */
 
 export interface AssetsResponse {
@@ -56,4 +55,76 @@ export interface StudiesResponse {
   fibonacci: Record<string, number> | null;
   soporte_resistencia: SoporteResistencia;
   pivotes: Record<string, number>;
+}
+
+export interface DesempenoHistorico {
+  cagr_sugeridor: number;
+  sharpe_sugeridor: number;
+  max_drawdown_sugeridor: number;
+  n_trades_sugeridor: number;
+  cagr_buy_and_hold: number;
+  sharpe_buy_and_hold: number;
+  max_drawdown_buy_and_hold: number;
+}
+
+export interface SuggesterResponse {
+  sugerencia: "COMPRAR" | "VENDER" | "ESPERAR";
+  votos_alcistas: number;
+  votos_bajistas: number;
+  votos_neutrales: number;
+  confianza: number;
+  detalle: Record<string, "alcista" | "bajista" | "neutral">;
+  desempeno_historico: DesempenoHistorico;
+}
+
+export interface RiskResponse {
+  asset: string;
+  vol_realizada: number;
+  modelo_garch: string;
+  vol_garch: number;
+  regimen: "calma" | "normal" | "tension" | null;
+  var95: number;
+  es95: number;
+  accion: "LONG" | "FLAT" | "SHORT";
+  score: number;
+  tamano_sugerido: number;
+  ultima_fecha: string;
+}
+
+export interface EquityPoint {
+  fecha: string;
+  valor: number;
+}
+
+export interface BacktestResponse {
+  asset: string;
+  metrics_estrategia: Record<string, number>;
+  metrics_buy_and_hold: Record<string, number>;
+  equity_curve_estrategia: EquityPoint[];
+  equity_curve_buy_and_hold: EquityPoint[];
+}
+
+export interface GarchSeriesResponse {
+  asset: string;
+  fechas: string[];
+  vol_condicional: (number | null)[];
+  modelo_garch: string;
+  regimen_actual: "calma" | "normal" | "tension" | null;
+}
+
+export interface PredictionResponse {
+  asset: string;
+  used_onchain: boolean;
+  onchain_columns: string[];
+  ultima_fecha: string;
+  prediccion_clase: "LONG" | "FLAT" | "SHORT";
+  prediccion_confianza: number;
+  prediccion_proba: Record<string, number>;
+  accuracy_media: number;
+  baseline_azar: number;
+  baseline_mayoritaria: number;
+  supera_azar: boolean;
+  supera_mayoritaria: boolean;
+  roc_auc_media: number;
+  top_features: [string, number][];
 }

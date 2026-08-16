@@ -10,7 +10,16 @@
  * desarrollo.
  */
 
-import type { AssetsResponse, OHLCVResponse, StudiesResponse } from "./types";
+import type {
+  AssetsResponse,
+  BacktestResponse,
+  GarchSeriesResponse,
+  OHLCVResponse,
+  PredictionResponse,
+  RiskResponse,
+  StudiesResponse,
+  SuggesterResponse,
+} from "./types";
 
 export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -61,4 +70,31 @@ export function getOhlcv(asset: string, interval: string, limit: number): Promis
 
 export function getStudies(asset: string, interval: string, limit: number): Promise<StudiesResponse> {
   return apiGet<StudiesResponse>("/api/studies", { asset, interval, limit });
+}
+
+export function getSuggester(asset: string, interval: string): Promise<SuggesterResponse> {
+  return apiGet<SuggesterResponse>("/api/suggester", { asset, interval });
+}
+
+/** Lento (ajusta un modelo GARCH) — ver `api/main.py`. */
+export function getRisk(asset: string): Promise<RiskResponse> {
+  return apiGet<RiskResponse>("/api/risk", { asset });
+}
+
+export function getBacktest(asset: string): Promise<BacktestResponse> {
+  return apiGet<BacktestResponse>("/api/backtest", { asset });
+}
+
+/** Lento (ajusta un modelo GARCH) — ver `api/main.py`. */
+export function getGarchSeries(asset: string): Promise<GarchSeriesResponse> {
+  return apiGet<GarchSeriesResponse>("/api/garch-series", { asset });
+}
+
+/**
+ * MUY LENTO (15-30s: entrena XGBoost con validación purgeada, ver
+ * `api/main.py`) — SIEMPRE disparar esto ante una acción explícita del
+ * usuario (un botón), nunca automáticamente al montar una vista.
+ */
+export function getPrediction(asset: string): Promise<PredictionResponse> {
+  return apiGet<PredictionResponse>("/api/prediction", { asset });
 }

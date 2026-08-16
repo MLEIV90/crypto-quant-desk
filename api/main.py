@@ -7,10 +7,14 @@ módulo/función reutiliza.
 
 RENDIMIENTO — léase antes de integrar un frontend: `/api/risk` y
 `/api/garch-series` ajustan un modelo GARCH (grid search sobre varias
-especificaciones, `models.garch.select_best_model`) en cada request — son
-los endpoints LENTOS de esta API (varios segundos en activos con mucha
-historia). `/api/backtest` corre un backtest vectorizado completo
-(rápido). El resto (`/api/assets`, `/api/ohlcv`, `/api/studies`,
+especificaciones, `models.garch.select_best_model`) en cada request —
+varios segundos en activos con mucha historia. `/api/prediction` es el
+endpoint MÁS LENTO de todos: entrena/evalúa el modelo primario de ML con
+validación purgeada (varios ajustes de XGBoost) en cada request, del orden
+de 15-30 segundos — un frontend NUNCA debería dispararlo automáticamente
+al cargar una vista, solo ante una acción explícita del usuario (un botón
+"correr predicción"). `/api/backtest` corre un backtest vectorizado
+completo (rápido). El resto (`/api/assets`, `/api/ohlcv`, `/api/studies`,
 `/api/suggester`) son livianos (indicadores vectorizados, sin ajuste de
 modelos). Ninguno cachea entre requests — cada llamada recalcula desde
 cero (simple y correcto; una capa de caché queda para una fase futura si
@@ -36,6 +40,7 @@ from api.models import (
     EquityPoint,
     GarchSeriesResponse,
     OHLCVResponse,
+    PredictionResponse,
     RiskResponse,
     StudiesResponse,
     SuggesterResponse,
@@ -44,6 +49,9 @@ from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
 from config import UNIVERSE
 from data.loaders import get_prices
 from metrics.risk_measures import expected_shortfall, value_at_risk
+from ml.features import align_features_labels, build_feature_matrix
+from ml.labeling import get_daily_volatility, triple_barrier_labels
+from ml.models import evaluate_primary_with_roc_auc, feature_importances, fit_final, latest_oos_prediction, t1_from_labels
 from models.garch import conditional_volatility, select_best_model, volatility_regime
 from signals.engine import generate_positions, latest_recommendation
 from signals.indicators import add_all_indicators
@@ -58,6 +66,15 @@ logger = logging.getLogger(__name__)
 # solo lee de ahí, nunca golpea Binance en vivo.
 SUPPORTED_INTERVALS: tuple[str, ...] = ("1d", "1h")
 DEFAULT_RISK_INTERVAL = "1d"  # el modelo GARCH del proyecto es diario, ver models/garch.py
+
+# Activos con cobertura on-chain suficiente para el modelo enriquecido de
+# /api/prediction (mismo criterio que `app.workers.ONCHAIN_ENABLED_ASSETS`
+# — ver ese módulo para el detalle de por qué BTC/ETH sí y el resto no).
+ONCHAIN_ENABLED_ASSETS: frozenset[str] = frozenset({"BTC", "ETH"})
+_PREDICTION_N_SPLITS = 5
+_PREDICTION_EMBARGO_PCT = 0.01
+_TOP_N_FEATURES = 8
+_CLASS_DISPLAY: dict[float, str] = {-1.0: "SHORT", 0.0: "FLAT", 1.0: "LONG"}
 
 app = FastAPI(
     title="crypto-quant-desk API",
@@ -349,6 +366,76 @@ def get_garch_series(asset: str) -> GarchSeriesResponse:
         vol_condicional=_series_to_list(cond_vol),
         modelo_garch=f"{best['vol']}/{best['dist']}",
         regimen_actual=str(last_regime) if pd.notna(last_regime) else None,
+    )
+
+
+# --------------------------------------------------------------------------
+# GET /api/prediction
+# --------------------------------------------------------------------------
+
+
+@router.get(
+    "/prediction",
+    response_model=PredictionResponse,
+    summary="Predicción OOS del modelo primario de ML (investigación, sin edge demostrado)",
+)
+def get_prediction(asset: str) -> PredictionResponse:
+    """Reutiliza `ml.features`/`ml.labeling`/`ml.models` tal cual — la misma
+    secuencia que `app.workers.PredictionWorker` para la pestaña
+    "Research (sin edge)" del cockpit, reescrita acá para no depender de la
+    app de escritorio (PySide6) desde la API.
+
+    MUY LENTO (ver docstring del módulo): entrena/evalúa XGBoost con
+    validación purgeada en cada request. Este endpoint es investigación con
+    resultado negativo — el modelo NUNCA superó de forma consistente a los
+    baselines triviales en ninguna validación del proyecto — no una
+    recomendación de operar.
+    """
+    df = _load_df(asset, DEFAULT_RISK_INTERVAL)
+    close = df["close"]
+    use_onchain = asset in ONCHAIN_ENABLED_ASSETS
+
+    X_raw = build_feature_matrix(df, include_onchain=use_onchain, asset=asset if use_onchain else None)
+    onchain_columns: list[str] = []
+    if use_onchain:
+        X_technical_raw = build_feature_matrix(df, include_onchain=False)
+        onchain_columns = [c for c in X_raw.columns if c not in X_technical_raw.columns]
+
+    volatility = get_daily_volatility(close)
+    labels_df = triple_barrier_labels(close, volatility)
+    X, y, sample_weight = align_features_labels(X_raw, labels_df)
+    t1 = t1_from_labels(labels_df, X.index)
+
+    evaluacion = evaluate_primary_with_roc_auc(
+        X, y, t1, sample_weight=sample_weight,
+        n_splits=_PREDICTION_N_SPLITS, embargo_pct=_PREDICTION_EMBARGO_PCT,
+    )
+    prediccion = latest_oos_prediction(
+        X, y, t1, sample_weight=sample_weight,
+        n_splits=_PREDICTION_N_SPLITS, embargo_pct=_PREDICTION_EMBARGO_PCT,
+    )
+
+    model = fit_final(X, y, sample_weight=sample_weight)
+    importances = feature_importances(model, X.columns)
+    top_features = [(str(name), float(val)) for name, val in importances.head(_TOP_N_FEATURES).items()]
+
+    proba_por_texto = {_CLASS_DISPLAY[k]: v for k, v in prediccion["proba"].items()}
+
+    return PredictionResponse(
+        asset=asset,
+        used_onchain=use_onchain,
+        onchain_columns=onchain_columns,
+        ultima_fecha=prediccion["fecha"].to_pydatetime(),
+        prediccion_clase=_CLASS_DISPLAY[prediccion["clase"]],
+        prediccion_confianza=prediccion["confianza"],
+        prediccion_proba=proba_por_texto,
+        accuracy_media=evaluacion["accuracy_media"],
+        baseline_azar=evaluacion["baseline_azar"],
+        baseline_mayoritaria=evaluacion["baseline_mayoritaria"],
+        supera_azar=evaluacion["supera_azar"],
+        supera_mayoritaria=evaluacion["supera_mayoritaria"],
+        roc_auc_media=evaluacion["roc_auc_media"],
+        top_features=top_features,
     )
 
 
