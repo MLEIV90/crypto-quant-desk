@@ -43,6 +43,42 @@ BTC, ETH, SOL, BNB, LTC (ver `config.UNIVERSE` para el mapeo de símbolos por fu
   agregado. El plan gratuito limita el histórico a ~365 días, y el endpoint viene exigiendo
   cada vez más una API key (puede responder 401 sin ella).
 
+## Arranque rápido (backend + frontend web)
+
+Requisitos: Python 3.10+ con las dependencias instaladas en un entorno
+virtual `.venv/` (ver abajo), y Node.js 20+ (para el frontend web,
+`frontend/`).
+
+**Windows** — doble click en `scripts\start.bat`, o desde una consola:
+
+```bat
+scripts\start.bat
+```
+
+Levanta el backend (`uvicorn api.main:app`) y el frontend (`npm run dev`)
+cada uno en su propia ventana, y abre el navegador en
+`http://localhost:5173`. Si falta Node.js/npm o el entorno virtual, el
+script lo avisa con un mensaje claro en vez de fallar en silencio. La
+primera vez instala automáticamente las dependencias del frontend
+(`npm install`) si no encuentra `frontend/node_modules`.
+
+**Mac/Linux**:
+
+```bash
+./scripts/start.sh
+```
+
+Mismo comportamiento, pero backend y frontend corren en segundo plano del
+mismo terminal (no hay forma portable de abrir "una ventana nueva" que
+sirva igual en todos los emuladores de terminal) — `Ctrl+C` corta los dos.
+
+Ambos scripts asumen el entorno virtual en `.venv/` en la raíz del repo
+(`python -m venv .venv && .venv/Scripts/pip install -r requirements.txt`
+en Windows, o `.venv/bin/pip install -r requirements.txt` en Mac/Linux).
+
+Para correr el frontend manualmente (sin el script), ver
+[`frontend/README.md`](frontend/README.md).
+
 ## Uso
 
 Instalar dependencias:

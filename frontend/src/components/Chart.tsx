@@ -14,6 +14,11 @@
  * en el cleanup) — los panes de los osciladores tienen que ser panes de
  * ESA MISMA instancia para quedar sincronizados en el eje temporal con las
  * velas; no son gráficos aparte.
+ *
+ * `onChartReady` (Fase 8d): notifica al padre la instancia de `IChartApi`
+ * y la serie de velas apenas se crean (y `null` al desmontar) para que
+ * `DrawingTools` pueda dibujar sobre EL MISMO chart — este componente no
+ * sabe nada de dibujo, solo expone el handle.
  */
 
 import { useEffect, useRef } from "react";
@@ -37,6 +42,7 @@ interface ChartProps {
   studies: StudiesResponse;
   activeOverlays: Set<OverlayKey>;
   activeOscillators: Set<OscillatorKey>;
+  onChartReady?: (chart: IChartApi | null, candleSeries: ISeriesApi<"Candlestick", Time> | null) => void;
 }
 
 type LineSeriesApi = ISeriesApi<"Line", Time>;
@@ -234,7 +240,7 @@ function removeOscillator(chart: IChartApi, artifact: OscillatorArtifact): void 
   chart.removePane(artifact.pane.paneIndex());
 }
 
-export function Chart({ ohlcv, studies, activeOverlays, activeOscillators }: ChartProps) {
+export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, onChartReady }: ChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
@@ -265,14 +271,17 @@ export function Chart({ ohlcv, studies, activeOverlays, activeOscillators }: Cha
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
+    onChartReady?.(chart, candleSeries);
 
     return () => {
+      onChartReady?.(null, null);
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
       overlayArtifactsRef.current.clear();
       oscillatorArtifactsRef.current.clear();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Velas: se recargan cuando cambia el activo/timeframe/ventana.

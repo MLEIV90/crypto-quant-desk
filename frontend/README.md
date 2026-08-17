@@ -23,6 +23,11 @@ otro (todavía).
 
   Por defecto queda en `http://127.0.0.1:8000` (Swagger en `/docs`).
 
+**Atajo (Fase 8d):** `../scripts/start.bat` (Windows) o `../scripts/start.sh`
+(Mac/Linux) levantan la API y este frontend juntos, con un solo comando —
+ver la sección "Arranque rápido" del [README de la raíz](../README.md).
+Lo que sigue en esta sección es para correrlo a mano, paso a paso.
+
 ## Cómo correrlo
 
 ```bash
@@ -62,22 +67,50 @@ src/
   api.ts                        # cliente HTTP de la API (capa fina, sin cálculos)
   types.ts                      # tipos TS que reflejan los esquemas Pydantic de la API
   theme.ts                      # paleta de colores del gráfico (misma que app/theme.py)
-  App.tsx                       # estado (activo/timeframe/toggles) + fetch vía React Query
+  alerts.ts                     # tipos + evaluación pura de reglas de alerta (Fase 8d)
+  drawings.ts                   # tipos de dibujos sobre el gráfico (Fase 8d)
+  App.tsx                       # estado compartido (activo/timeframe/vista activa)
+  hooks/
+    useLocalStorageState.ts     # persistencia genérica en localStorage (Fase 8d)
   components/
     AssetSelector.tsx           # selector de activo + timeframe
     StudyToggles.tsx            # checkboxes de overlays sobre el precio (SMA/EMA/Bollinger/Fibonacci/S-R/Pivotes)
     OscillatorPanel.tsx         # checkboxes de osciladores (RSI/MACD/Estocástico)
     Chart.tsx                   # gráfico de velas (lightweight-charts) + overlays + panes de osciladores
+    SuggesterPanel.tsx          # panel del sugeridor de consenso (Fase 8c)
+    AlertsPanel.tsx             # reglas de alerta client-side + toasts (Fase 8d)
+    DrawingTools.tsx            # líneas horizontales/de tendencia sobre el gráfico (Fase 8d)
+  views/
+    TechnicalAnalysisView.tsx   # velas + overlays + osciladores + sugeridor + alertas + dibujo
+    RiskView.tsx
+    BacktestView.tsx
+    ResearchView.tsx
 ```
 
-## Alcance de esta fase (8b)
+## Alcance actual (hasta Fase 8d)
 
-Solo el gráfico interactivo: velas + overlays toggleables + osciladores en
-panes sincronizados. **Todavía no incluye** las pestañas de riesgo/backtest
-ni el sugeridor de consenso (Fase 8c), ni alertas/dibujo manual sobre el
-gráfico (Fase 8d) — la app de escritorio (PySide6) sigue siendo, por ahora,
-la única forma de ver esas partes del proyecto.
+Las 4 vistas (Análisis Técnico, Riesgo, Backtest, Research) y todo lo
+descrito arriba. La app de escritorio (PySide6, `../app/`) sigue
+existiendo en paralelo — ninguna reemplaza a la otra (todavía).
 
-Por diseño, al entrar solo se muestran SMA 20 y SMA 50 sobre las velas y
-ningún oscilador — el resto de los overlays/osciladores se agregan desde
-los checkboxes, nunca todo encimado de entrada.
+Por diseño, al entrar a Análisis Técnico solo se muestran SMA 20 y SMA 50
+sobre las velas y ningún oscilador — el resto de los overlays/osciladores
+se agregan desde los checkboxes, nunca todo encimado de entrada.
+
+**Alertas (Fase 8d) — limitación honesta:** las reglas se evalúan
+client-side, en el navegador, contra los datos que ya trae `/api/studies`.
+Solo disparan mientras la pestaña está abierta y la vista de Análisis
+Técnico cargada — no hay notificaciones push, email, ni nada que llegue
+con la app cerrada. Las reglas sí persisten en `localStorage` entre
+sesiones.
+
+**Dibujo (Fase 8d) — enfoque técnico:** `lightweight-charts` (versión
+gratuita, la que usa este proyecto) no trae herramientas de dibujo
+interactivas — eso es parte de un plugin comercial aparte. Líneas
+horizontales usan la primitiva nativa `series.createPriceLine()` (la
+misma que ya se usaba para Fibonacci/soporte-resistencia/pivotes). Líneas
+de tendencia se arman a mano con una `LineSeries` de 2 puntos, tomando el
+click del usuario sobre el gráfico vía `chart.subscribeClick()` +
+`series.coordinateToPrice()` — no hay dependencia nueva, todo con la API
+pública gratuita de la librería. Los dibujos persisten en `localStorage`,
+por activo y timeframe.
