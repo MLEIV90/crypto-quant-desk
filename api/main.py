@@ -15,10 +15,16 @@ de 15-30 segundos — un frontend NUNCA debería dispararlo automáticamente
 al cargar una vista, solo ante una acción explícita del usuario (un botón
 "correr predicción"). `/api/backtest` corre un backtest vectorizado
 completo (rápido). El resto (`/api/assets`, `/api/ohlcv`, `/api/studies`,
-`/api/suggester`) son livianos (indicadores vectorizados, sin ajuste de
-modelos). Ninguno cachea entre requests — cada llamada recalcula desde
-cero (simple y correcto; una capa de caché queda para una fase futura si
-hiciera falta).
+`/api/suggester`, `/api/data-status`) son livianos (indicadores
+vectorizados, sin ajuste de modelos). Ninguno cachea entre requests — cada
+llamada recalcula desde cero (simple y correcto; una capa de caché queda
+para una fase futura si hiciera falta).
+
+RED — `/api/refresh` (Fase 9a) es el ÚNICO endpoint de toda la API que
+toca la red (Binance): todos los demás solo leen `data/snapshot/*.parquet`
+(estático hasta que se llama a `/api/refresh`). Puede tardar varios
+segundos; pensado para dispararse desde un botón explícito ("Actualizar
+datos"), nunca automáticamente.
 
 Uso (desarrollo):
     uvicorn api.main:app --reload
@@ -37,10 +43,12 @@ from api.models import (
     AssetsResponse,
     BacktestResponse,
     Candle,
+    DataStatusResponse,
     EquityPoint,
     GarchSeriesResponse,
     OHLCVResponse,
     PredictionResponse,
+    RefreshResponse,
     RiskResponse,
     StudiesResponse,
     SuggesterResponse,
@@ -48,6 +56,7 @@ from api.models import (
 from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
 from config import UNIVERSE
 from data.loaders import get_prices
+from data.snapshot import GeoblockedError, last_closed_candle_open_time, update_snapshot
 from metrics.risk_measures import expected_shortfall, value_at_risk
 from ml.features import align_features_labels, build_feature_matrix
 from ml.labeling import get_daily_volatility, triple_barrier_labels
@@ -62,8 +71,9 @@ from signals.suggester import suggest
 logger = logging.getLogger(__name__)
 
 # Intervalos que efectivamente tiene exportados el snapshot local
-# (`source="store"`, ver scripts/export_snapshot.py y Fase 6b) — la API
-# solo lee de ahí, nunca golpea Binance en vivo.
+# (`source="store"`, ver scripts/export_snapshot.py y Fase 6b). Todos los
+# endpoints de LECTURA solo leen de ahí — el único que golpea Binance en
+# vivo es `POST /api/refresh` (Fase 9a, ver data.snapshot.update_snapshot).
 SUPPORTED_INTERVALS: tuple[str, ...] = ("1d", "1h")
 DEFAULT_RISK_INTERVAL = "1d"  # el modelo GARCH del proyecto es diario, ver models/garch.py
 
@@ -71,6 +81,14 @@ DEFAULT_RISK_INTERVAL = "1d"  # el modelo GARCH del proyecto es diario, ver mode
 # /api/prediction (mismo criterio que `app.workers.ONCHAIN_ENABLED_ASSETS`
 # — ver ese módulo para el detalle de por qué BTC/ETH sí y el resto no).
 ONCHAIN_ENABLED_ASSETS: frozenset[str] = frozenset({"BTC", "ETH"})
+
+# Umbral de antigüedad a partir del cual /api/data-status marca el snapshot
+# como desactualizado (Fase 9a): una vela diaria recién cerrada tiene hasta
+# 1 día de "antigüedad normal"; una horaria, hasta 2h (algo de margen sobre
+# el intervalo mismo, para no marcar en ámbar el instante justo después de
+# que cierra la última vela).
+STALE_THRESHOLD_SECONDS: dict[str, float] = {"1d": 24 * 3600, "1h": 2 * 3600}
+
 _PREDICTION_N_SPLITS = 5
 _PREDICTION_EMBARGO_PCT = 0.01
 _TOP_N_FEATURES = 8
@@ -126,11 +144,27 @@ def _validate_interval(interval: str) -> None:
 def _load_df(asset: str, interval: str) -> pd.DataFrame:
     """Precios estandarizados desde el snapshot local (`data.loaders.get_prices`,
     `source="store"`) — el único punto de entrada a datos de toda la API.
+
+    `use_cache=False` a propósito (Fase 9a): `get_prices` cachearía el
+    resultado en `data/cache/{asset}_store_{interval}.parquet`, una copia
+    SEPARADA del propio `data/snapshot/{asset}_{interval}.parquet` — sin
+    esto, tras un `POST /api/refresh` que reescribe el snapshot, esta
+    función seguiría devolviendo la copia vieja de `data/cache/` para
+    siempre (el snapshot en sí ya es un archivo local: cachear una copia de
+    una lectura de archivo local no ahorra nada y solo agrega una fuente de
+    datos desactualizados).
+
+    `end` explícito a "mañana" (Fase 9a), también a propósito: el default de
+    `get_prices` cuando no se pasa `end` es la fecha de HOY sin hora
+    ("YYYY-MM-DD" -> medianoche UTC), así que con `interval="1h"` recortaría
+    silenciosamente cualquier vela horaria de HOY posterior a la
+    medianoche — justo las velas que un refresco recién bajado agregaría.
     """
     _validate_asset(asset)
     _validate_interval(interval)
+    tomorrow = (pd.Timestamp.now(tz="UTC") + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     try:
-        return get_prices(asset, source="store", interval=interval)
+        return get_prices(asset, source="store", interval=interval, end=tomorrow, use_cache=False)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -145,6 +179,21 @@ def _series_to_list(series: pd.Series) -> list[float | None]:
 
 def _dates_to_list(index: pd.DatetimeIndex) -> list:
     return list(index.to_pydatetime())
+
+
+def _humanize_age(delta: pd.Timedelta) -> str:
+    """Antigüedad legible en español, para /api/data-status ("hace 5 días", "hace 3 h")."""
+    seconds = delta.total_seconds()
+    if seconds < 60:
+        return "hace instantes"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"hace {int(minutes)} min"
+    hours = minutes / 60
+    if hours < 24:
+        return f"hace {int(hours)} h"
+    days = int(hours / 24)
+    return f"hace {days} día" + ("" if days == 1 else "s")
 
 
 # --------------------------------------------------------------------------
@@ -436,6 +485,87 @@ def get_prediction(asset: str) -> PredictionResponse:
         supera_mayoritaria=evaluacion["supera_mayoritaria"],
         roc_auc_media=evaluacion["roc_auc_media"],
         top_features=top_features,
+    )
+
+
+# --------------------------------------------------------------------------
+# GET /api/data-status
+# --------------------------------------------------------------------------
+
+
+@router.get("/data-status", response_model=DataStatusResponse, summary="Antigüedad del snapshot local")
+def get_data_status(asset: str, interval: str = "1d") -> DataStatusResponse:
+    """Solo LEE el snapshot local (`_load_df`, sin red) y compara su última
+    fecha contra "ahora" (UTC) — pensado para que el frontend muestre
+    SIEMPRE de qué fecha son los datos que está mirando, sin tener que
+    disparar `/api/refresh` (que sí toca la red) solo para chequear.
+
+    `desactualizado` NO compara contra "ahora" directo: una vela diaria se
+    indexa por su OPEN time (ver `data.loaders._load_binance`), así que la
+    última vela CERRADA disponible en este instante siempre está entre 24 y
+    48hs "vieja" respecto de "ahora" aunque el snapshot esté perfectamente
+    al día — comparar contra "ahora" marcaría el dato como desactualizado
+    casi todo el día, todos los días, incluso recién refrescado. En cambio
+    se compara contra la última vela YA CERRADA que existe en este momento
+    (`data.snapshot._last_closed_candle_open_time`, la misma cuenta que usa
+    `update_snapshot` para decidir qué bajar): si coincide con lo que ya
+    tenemos, antigüedad-vs-lo-más-fresco-posible es 0 y no es
+    "desactualizado", sin importar la hora del día.
+    """
+    df = _load_df(asset, interval)
+    ultima_fecha = df.index.max()
+    now = pd.Timestamp.now(tz="UTC")
+    delta = now - ultima_fecha
+    threshold = STALE_THRESHOLD_SECONDS.get(interval, STALE_THRESHOLD_SECONDS["1d"])
+    last_closed = last_closed_candle_open_time(interval)
+    gap_vs_freshest = (last_closed - ultima_fecha).total_seconds()
+
+    return DataStatusResponse(
+        asset=asset,
+        interval=interval,
+        ultima_fecha=ultima_fecha.to_pydatetime(),
+        antiguedad_segundos=delta.total_seconds(),
+        antiguedad_texto=_humanize_age(delta),
+        desactualizado=gap_vs_freshest > threshold,
+    )
+
+
+# --------------------------------------------------------------------------
+# POST /api/refresh
+# --------------------------------------------------------------------------
+
+
+@router.post(
+    "/refresh",
+    response_model=RefreshResponse,
+    summary="Actualiza el snapshot local desde Binance (SÍ toca la red)",
+)
+def refresh_snapshot(asset: str, interval: str = "1d") -> RefreshResponse:
+    """A diferencia de TODOS los demás endpoints de esta API (que solo leen
+    `data/snapshot/*.parquet`, nunca la red), este SÍ pega contra
+    api.binance.com (reutiliza `data.snapshot.update_snapshot`, que a su vez
+    reutiliza `data.loaders._load_binance` — no reimplementa la descarga).
+    Puede tardar varios segundos según cuántas velas nuevas haya. Pensado
+    para dispararse desde una acción EXPLÍCITA del usuario (un botón
+    "Actualizar datos"), nunca automáticamente al cargar una vista.
+    """
+    _validate_asset(asset)
+    _validate_interval(interval)
+    try:
+        result = update_snapshot(asset, interval)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GeoblockedError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - cualquier otra falla de red/HTTP, mensaje claro al frontend
+        raise HTTPException(status_code=502, detail=f"No se pudo actualizar '{asset}' desde Binance: {exc}") from exc
+
+    return RefreshResponse(
+        asset=asset,
+        interval=interval,
+        filas_agregadas=result["filas_agregadas"],
+        ultima_fecha=result["ultima_fecha"].to_pydatetime(),
+        ya_actualizado=result["ya_actualizado"],
     )
 
 

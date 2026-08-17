@@ -13,9 +13,11 @@
 import type {
   AssetsResponse,
   BacktestResponse,
+  DataStatusResponse,
   GarchSeriesResponse,
   OHLCVResponse,
   PredictionResponse,
+  RefreshResponse,
   RiskResponse,
   StudiesResponse,
   SuggesterResponse,
@@ -45,6 +47,30 @@ async function apiGet<T>(path: string, params: Record<string, string | number> =
   let response: Response;
   try {
     response = await fetch(url.toString());
+  } catch {
+    throw new ApiError(
+      `No se pudo conectar con la API en ${API_BASE_URL}. ¿Está corriendo "uvicorn api.main:app --reload"?`,
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new ApiError(body?.detail ?? `Error ${response.status} al llamar ${path}`, response.status);
+  }
+
+  return (await response.json()) as T;
+}
+
+async function apiPost<T>(path: string, params: Record<string, string | number> = {}): Promise<T> {
+  const url = new URL(path, API_BASE_URL);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, String(value));
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), { method: "POST" });
   } catch {
     throw new ApiError(
       `No se pudo conectar con la API en ${API_BASE_URL}. ¿Está corriendo "uvicorn api.main:app --reload"?`,
@@ -97,4 +123,18 @@ export function getGarchSeries(asset: string): Promise<GarchSeriesResponse> {
  */
 export function getPrediction(asset: string): Promise<PredictionResponse> {
   return apiGet<PredictionResponse>("/api/prediction", { asset });
+}
+
+/** Solo lee el snapshot local (rápido, sin red) — ver `api/main.py`. */
+export function getDataStatus(asset: string, interval: string): Promise<DataStatusResponse> {
+  return apiGet<DataStatusResponse>("/api/data-status", { asset, interval });
+}
+
+/**
+ * ÚNICO endpoint de toda la API que toca la red (Binance) — puede tardar
+ * varios segundos. Dispararlo solo ante una acción explícita del usuario
+ * (el botón "Actualizar datos"), nunca automáticamente.
+ */
+export function postRefresh(asset: string, interval: string): Promise<RefreshResponse> {
+  return apiPost<RefreshResponse>("/api/refresh", { asset, interval });
 }

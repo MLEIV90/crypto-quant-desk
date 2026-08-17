@@ -177,3 +177,26 @@ class PredictionResponse(BaseModel):
     supera_mayoritaria: bool
     roc_auc_media: float
     top_features: list[tuple[str, float]]
+
+
+class RefreshResponse(BaseModel):
+    """Respuesta de `POST /api/refresh` — resultado de `data.snapshot.update_snapshot`."""
+
+    asset: str
+    interval: str
+    filas_agregadas: int = Field(description="Velas nuevas agregadas al snapshot local")
+    ultima_fecha: datetime = Field(description="Última fecha disponible en el snapshot tras la actualización")
+    ya_actualizado: bool = Field(description="True si no había velas nuevas para bajar (snapshot ya al día)")
+
+
+class DataStatusResponse(BaseModel):
+    """Respuesta de `GET /api/data-status` — antigüedad del snapshot local, para que la UI la muestre siempre."""
+
+    asset: str
+    interval: str
+    ultima_fecha: datetime = Field(description="Última fecha disponible en el snapshot local")
+    antiguedad_segundos: float = Field(description="Segundos transcurridos entre ultima_fecha y ahora (UTC)")
+    antiguedad_texto: str = Field(description='Texto legible, p. ej. "hace 5 días" o "hace 3 horas"')
+    desactualizado: bool = Field(
+        description="True si la antigüedad supera el umbral esperado del intervalo (1 día para 1d, 2h para 1h)"
+    )

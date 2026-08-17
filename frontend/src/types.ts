@@ -112,6 +112,23 @@ export interface GarchSeriesResponse {
   regimen_actual: "calma" | "normal" | "tension" | null;
 }
 
+export interface DataStatusResponse {
+  asset: string;
+  interval: string;
+  ultima_fecha: string;
+  antiguedad_segundos: number;
+  antiguedad_texto: string;
+  desactualizado: boolean;
+}
+
+export interface RefreshResponse {
+  asset: string;
+  interval: string;
+  filas_agregadas: number;
+  ultima_fecha: string;
+  ya_actualizado: boolean;
+}
+
 export interface PredictionResponse {
   asset: string;
   used_onchain: boolean;

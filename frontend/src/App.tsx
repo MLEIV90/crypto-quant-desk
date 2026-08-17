@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import "./App.css";
 import { getAssets } from "./api";
 import { AssetSelector } from "./components/AssetSelector";
+import { DataStatusBar } from "./components/DataStatusBar";
 import { NavTabs, type ViewKey } from "./components/NavTabs";
 import { TechnicalAnalysisView } from "./views/TechnicalAnalysisView";
 import { RiskView } from "./views/RiskView";
@@ -36,6 +37,12 @@ function Dashboard() {
   const assets = useMemo(() => assetsQuery.data?.activos ?? [asset], [assetsQuery.data, asset]);
   const timeframes = useMemo(() => assetsQuery.data?.timeframes ?? [interval], [assetsQuery.data, interval]);
 
+  // Riesgo/Backtest/Research siempre operan en diario (DEFAULT_RISK_INTERVAL
+  // en api/main.py) — el selector de timeframe ni se muestra ahí (ver
+  // AssetSelector.showTimeframe), así que el estado de datos que corresponde
+  // mostrar en esas vistas es siempre el de "1d", no el de `interval`.
+  const dataStatusInterval = activeView === "tecnico" ? interval : "1d";
+
   return (
     <div className="app">
       <header className="app__header">
@@ -51,6 +58,8 @@ function Dashboard() {
           showTimeframe={activeView === "tecnico"}
         />
       </header>
+
+      <DataStatusBar asset={asset} interval={dataStatusInterval} />
 
       <p className="disclaimer">{DISCLAIMER_TEXT}</p>
 

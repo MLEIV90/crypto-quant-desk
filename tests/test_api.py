@@ -12,12 +12,32 @@ tarde más de lo necesario.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+import api.main as api_main
 from api.main import app
+from data import loaders
+from data.snapshot import GeoblockedError, last_closed_candle_open_time
 
 client = TestClient(app)
+
+
+def _write_fake_store_snapshot(directory: Path, asset: str, interval: str, ultima_fecha: pd.Timestamp) -> None:
+    """Snapshot mínimo de fixture para /api/data-status, con última fecha controlada."""
+    idx = pd.date_range(end=ultima_fecha, periods=3, freq="D" if interval == "1d" else "h", tz="UTC")
+    df = pd.DataFrame(
+        {
+            "open": [1.0, 2.0, 3.0], "high": [1.0, 2.0, 3.0], "low": [1.0, 2.0, 3.0], "close": [1.0, 2.0, 3.0],
+            "volume": [10.0, 20.0, 30.0],
+        },
+        index=idx,
+    )
+    df.index.name = "timestamp"
+    df.to_parquet(directory / f"{asset}_{interval}.parquet")
 
 
 # --------------------------------------------------------------------------
@@ -229,6 +249,167 @@ def test_get_prediction_unknown_asset_returns_404() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/data-status (Fase 9a)
+# --------------------------------------------------------------------------
+
+
+def test_get_data_status_returns_expected_fields() -> None:
+    response = client.get("/api/data-status", params={"asset": "BTC", "interval": "1d"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["asset"] == "BTC"
+    assert body["interval"] == "1d"
+    assert body["antiguedad_segundos"] >= 0
+    assert isinstance(body["desactualizado"], bool)
+    assert body["antiguedad_texto"].startswith("hace")
+
+
+def test_get_data_status_unknown_asset_returns_404() -> None:
+    response = client.get("/api/data-status", params={"asset": "DOGE"})
+
+    assert response.status_code == 404
+
+
+def test_get_data_status_flags_stale_daily_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    old_date = pd.Timestamp.now(tz="UTC").floor("D") - pd.Timedelta(days=5)
+    _write_fake_store_snapshot(tmp_path, "BTC", "1d", old_date)
+
+    response = client.get("/api/data-status", params={"asset": "BTC", "interval": "1d"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["desactualizado"] is True
+    assert body["antiguedad_segundos"] >= 4 * 24 * 3600
+    assert "día" in body["antiguedad_texto"]
+
+
+def test_get_data_status_flags_freshly_refreshed_daily_snapshot_as_up_to_date(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un snapshot que YA tiene la última vela cerrada disponible (lo que
+    dejaría un `POST /api/refresh` recién corrido) no debe marcarse
+    desactualizado, sin importar la hora del día en que se consulte —
+    ver el docstring de `get_data_status`: comparar contra "ahora" directo
+    marcaría esto como viejo casi siempre, porque una vela diaria SIEMPRE
+    tiene entre 24 y 48hs de antigüedad de reloj por construcción (se
+    indexa por su open time).
+    """
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    freshest_possible = last_closed_candle_open_time("1d")
+    _write_fake_store_snapshot(tmp_path, "BTC", "1d", freshest_possible)
+
+    response = client.get("/api/data-status", params={"asset": "BTC", "interval": "1d"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["desactualizado"] is False
+    # el texto legible SÍ refleja la antigüedad real de reloj (24-48hs) —
+    # eso es correcto y esperado, es un dato distinto de "desactualizado".
+    assert body["antiguedad_segundos"] > 0
+
+
+def test_get_data_status_flags_stale_hourly_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    old_date = pd.Timestamp.now(tz="UTC").floor("h") - pd.Timedelta(hours=5)
+    _write_fake_store_snapshot(tmp_path, "BTC", "1h", old_date)
+
+    response = client.get("/api/data-status", params={"asset": "BTC", "interval": "1h"})
+
+    assert response.status_code == 200
+    assert response.json()["desactualizado"] is True  # umbral horario: 2h, no 1 día
+
+
+# --------------------------------------------------------------------------
+# POST /api/refresh (Fase 9a) — mockeado, NUNCA pega a Binance en tests
+# --------------------------------------------------------------------------
+
+
+def test_post_refresh_returns_expected_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_update_snapshot(asset: str, interval: str) -> dict:
+        assert asset == "BTC"
+        assert interval == "1d"
+        return {
+            "filas_agregadas": 3,
+            "ultima_fecha": pd.Timestamp("2026-08-16", tz="UTC"),
+            "ya_actualizado": False,
+        }
+
+    monkeypatch.setattr(api_main, "update_snapshot", fake_update_snapshot)
+
+    response = client.post("/api/refresh", params={"asset": "BTC", "interval": "1d"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["asset"] == "BTC"
+    assert body["interval"] == "1d"
+    assert body["filas_agregadas"] == 3
+    assert body["ya_actualizado"] is False
+    assert body["ultima_fecha"].startswith("2026-08-16")
+
+
+def test_post_refresh_already_up_to_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_update_snapshot(asset: str, interval: str) -> dict:
+        return {"filas_agregadas": 0, "ultima_fecha": pd.Timestamp("2026-08-16", tz="UTC"), "ya_actualizado": True}
+
+    monkeypatch.setattr(api_main, "update_snapshot", fake_update_snapshot)
+
+    response = client.post("/api/refresh", params={"asset": "BTC", "interval": "1d"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["filas_agregadas"] == 0
+    assert body["ya_actualizado"] is True
+
+
+def test_post_refresh_geoblocked_returns_502_with_clear_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_update_snapshot(asset: str, interval: str) -> dict:
+        raise GeoblockedError("Binance bloqueó la descarga por geolocalización (HTTP 451/403)")
+
+    monkeypatch.setattr(api_main, "update_snapshot", fake_update_snapshot)
+
+    response = client.post("/api/refresh", params={"asset": "BTC", "interval": "1d"})
+
+    assert response.status_code == 502
+    assert "geolocaliz" in response.json()["detail"].lower()
+
+
+def test_post_refresh_network_failure_returns_502(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_update_snapshot(asset: str, interval: str) -> dict:
+        raise ConnectionError("no se pudo conectar a Binance")
+
+    monkeypatch.setattr(api_main, "update_snapshot", fake_update_snapshot)
+
+    response = client.post("/api/refresh", params={"asset": "BTC", "interval": "1d"})
+
+    assert response.status_code == 502
+
+
+def test_post_refresh_missing_snapshot_returns_404(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_update_snapshot(asset: str, interval: str) -> dict:
+        raise FileNotFoundError(f"No existe el snapshot local para {asset}")
+
+    monkeypatch.setattr(api_main, "update_snapshot", fake_update_snapshot)
+
+    response = client.post("/api/refresh", params={"asset": "BTC", "interval": "1d"})
+
+    assert response.status_code == 404
+
+
+def test_post_refresh_unknown_asset_returns_404() -> None:
+    response = client.post("/api/refresh", params={"asset": "DOGE"})
+
+    assert response.status_code == 404
+
+
+def test_post_refresh_invalid_interval_returns_400() -> None:
+    response = client.post("/api/refresh", params={"asset": "BTC", "interval": "5m"})
+
+    assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------
 # Documentación automática (Swagger/OpenAPI)
 # --------------------------------------------------------------------------
 
@@ -243,4 +424,5 @@ def test_docs_and_openapi_schema_are_available() -> None:
     assert set(paths.keys()) == {
         "/api/assets", "/api/ohlcv", "/api/studies", "/api/suggester",
         "/api/risk", "/api/backtest", "/api/garch-series", "/api/prediction",
+        "/api/data-status", "/api/refresh",
     }

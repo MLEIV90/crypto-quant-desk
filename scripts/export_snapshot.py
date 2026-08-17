@@ -39,15 +39,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import UNIVERSE  # noqa: E402
 from data.loaders import get_prices  # noqa: E402
 from data.quality import validate_ohlcv  # noqa: E402
+from data.snapshot import is_geoblocked_error  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_START_BY_INTERVAL: dict[str, str] = {"1d": "2018-01-01", "1h": "2020-01-01"}
 DEFAULT_OUT_DIR = "data/snapshot"
-
-# Códigos HTTP típicos del geobloqueo de Binance en ciertas regiones
-# (451 = Unavailable For Legal Reasons, 403 = Forbidden).
-GEOBLOCK_STATUS_CODES = (451, 403)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -75,24 +72,6 @@ def _yesterday_utc() -> str:
     return (pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
 
-def _is_geoblocked_error(exc: BaseException) -> bool:
-    """Recorre la cadena de excepciones (`__cause__`) buscando un status HTTP
-    451 o 403: la señal típica de geobloqueo de Binance en ciertas regiones.
-    `get_prices` ya reintenta con CoinMetrics/CoinGecko antes de propagar
-    cualquier excepción, así que esto solo dispara si TODAS las fuentes
-    fallaron y alguna de ellas devolvió ese status.
-    """
-    current: BaseException | None = exc
-    seen: set[int] = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        status_code = getattr(getattr(current, "response", None), "status_code", None)
-        if status_code in GEOBLOCK_STATUS_CODES:
-            return True
-        current = current.__cause__
-    return False
-
-
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = _build_arg_parser().parse_args()
@@ -118,7 +97,7 @@ def main() -> None:
             # desactualizado sin pegarle a la red.
             df = get_prices(asset, source="binance", interval=interval, start=start, end=end, use_cache=False)
         except Exception as exc:  # noqa: BLE001 - loguear y seguir con el resto del universo
-            if _is_geoblocked_error(exc):
+            if is_geoblocked_error(exc):
                 logger.error(
                     "%s: la descarga de Binance falló con HTTP 403/451 — posible geobloqueo de "
                     "Binance en tu región. Se omite este activo y se continúa con el resto.",
