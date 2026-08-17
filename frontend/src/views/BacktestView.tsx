@@ -7,8 +7,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getBacktest } from "../api";
+import { InfoTooltip } from "../components/InfoTooltip";
 import { LineChartPanel } from "../components/LineChartPanel";
 import { StatusMessage } from "../components/StatusMessage";
+import { BACKTEST_EQUITY_HELP, BACKTEST_METRIC_HELP } from "../helpTexts";
 import { COLORS } from "../theme";
 
 interface MetricRow {
@@ -50,7 +52,10 @@ export function BacktestView({ asset }: BacktestViewProps) {
 
       {!errorMessage && backtest && (
         <>
-          <h3 className="panel-subtitle">Equity: estrategia vs. buy &amp; hold</h3>
+          <h3 className="panel-subtitle">
+            Equity: estrategia vs. buy &amp; hold
+            <InfoTooltip text={BACKTEST_EQUITY_HELP} />
+          </h3>
           <LineChartPanel
             series={[
               {
@@ -81,7 +86,10 @@ export function BacktestView({ asset }: BacktestViewProps) {
             <tbody>
               {METRIC_ROWS.map(({ key, label, format }) => (
                 <tr key={key}>
-                  <td>{label}</td>
+                  <td>
+                    {label}
+                    <InfoTooltip text={BACKTEST_METRIC_HELP[key]} />
+                  </td>
                   <td>{format(backtest.metrics_estrategia[key])}</td>
                   <td>{format(backtest.metrics_buy_and_hold[key])}</td>
                 </tr>

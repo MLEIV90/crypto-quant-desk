@@ -9,7 +9,13 @@
  * Todos apagados por defecto: igual que los overlays (ver `StudyToggles`),
  * el usuario agrega los osciladores que quiera en vez de arrancar con todo
  * encimado.
+ *
+ * Cada chip lleva un `InfoTooltip` (Fase 9b) con el texto de
+ * `../helpTexts.ts::OSCILLATOR_HELP`.
  */
+
+import { InfoTooltip } from "./InfoTooltip";
+import { OSCILLATOR_HELP } from "../helpTexts";
 
 export type OscillatorKey = "rsi" | "macd" | "stochastic";
 
@@ -34,6 +40,7 @@ export function OscillatorPanel({ active, onToggle }: OscillatorPanelProps) {
         <label key={key} className={`toggle-chip${active.has(key) ? " toggle-chip--active" : ""}`}>
           <input type="checkbox" checked={active.has(key)} onChange={() => onToggle(key)} />
           {label}
+          <InfoTooltip text={OSCILLATOR_HELP[key]} placement="bottom" />
         </label>
       ))}
     </fieldset>

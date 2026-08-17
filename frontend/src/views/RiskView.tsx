@@ -14,6 +14,7 @@ import { ApiError, getGarchSeries, getOhlcv, getRisk } from "../api";
 import { LineChartPanel } from "../components/LineChartPanel";
 import { MetricCard } from "../components/MetricCard";
 import { StatusMessage } from "../components/StatusMessage";
+import { RISK_INTRO_HELP, RISK_METRIC_HELP } from "../helpTexts";
 import { COLORS, DIRECTION_COLORS, REGIME_COLORS } from "../theme";
 
 const PRICE_CANDLE_LIMIT = 300;
@@ -40,9 +41,7 @@ export function RiskView({ asset }: RiskViewProps) {
 
   return (
     <section className="view">
-      <p className="view-note">
-        Estas son medidas de RIESGO y de SIZING calculadas sobre la historia — no son una predicción de precio.
-      </p>
+      <p className="view-note">{RISK_INTRO_HELP}</p>
 
       {errorMessage && <StatusMessage kind="error">{errorMessage}</StatusMessage>}
       {!errorMessage && isLoading && (
@@ -51,24 +50,43 @@ export function RiskView({ asset }: RiskViewProps) {
 
       {!errorMessage && risk && (
         <div className="metric-grid">
-          <MetricCard label="Vol. realizada anualizada" value={`${(risk.vol_realizada * 100).toFixed(2)}%`} />
-          <MetricCard label="Modelo GARCH ganador" value={risk.modelo_garch} />
-          <MetricCard label="Vol. condicional GARCH" value={`${(risk.vol_garch * 100).toFixed(2)}%`} />
+          <MetricCard
+            label="Vol. realizada anualizada"
+            value={`${(risk.vol_realizada * 100).toFixed(2)}%`}
+            help={RISK_METRIC_HELP.volRealizada}
+          />
+          <MetricCard label="Modelo GARCH ganador" value={risk.modelo_garch} help={RISK_METRIC_HELP.modeloGarch} />
+          <MetricCard
+            label="Vol. condicional GARCH"
+            value={`${(risk.vol_garch * 100).toFixed(2)}%`}
+            help={RISK_METRIC_HELP.volGarch}
+          />
           <MetricCard
             label="Régimen de volatilidad"
             value={risk.regimen ? risk.regimen.toUpperCase() : "—"}
             valueColor={risk.regimen ? REGIME_COLORS[risk.regimen] : undefined}
+            help={RISK_METRIC_HELP.regimen}
           />
-          <MetricCard label="VaR 95% (pérdida diaria)" value={`${(risk.var95 * 100).toFixed(2)}%`} />
-          <MetricCard label="Expected Shortfall 95%" value={`${(risk.es95 * 100).toFixed(2)}%`} />
+          <MetricCard
+            label="VaR 95% (pérdida diaria)"
+            value={`${(risk.var95 * 100).toFixed(2)}%`}
+            help={RISK_METRIC_HELP.var95}
+          />
+          <MetricCard
+            label="Expected Shortfall 95%"
+            value={`${(risk.es95 * 100).toFixed(2)}%`}
+            help={RISK_METRIC_HELP.es95}
+          />
           <MetricCard
             label="Señal del engine"
             value={`${risk.accion} (score ${risk.score >= 0 ? "+" : ""}${risk.score.toFixed(2)})`}
             valueColor={DIRECTION_COLORS[risk.accion]}
+            help={RISK_METRIC_HELP.senal}
           />
           <MetricCard
             label="Tamaño sugerido (vol targeting)"
             value={`${risk.tamano_sugerido >= 0 ? "+" : ""}${risk.tamano_sugerido.toFixed(2)}x`}
+            help={RISK_METRIC_HELP.sizing}
           />
         </div>
       )}

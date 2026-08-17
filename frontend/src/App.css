@@ -107,6 +107,84 @@
 }
 
 /* ---------------------------------------------------------------------
+   InfoTooltip: ícono "?" con explicación (Fase 9b)
+   --------------------------------------------------------------------- */
+
+.info-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+}
+
+.info-tooltip__trigger {
+  appearance: none;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-background);
+  color: var(--color-text-faint);
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  border-radius: 50%;
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-style: normal;
+  text-transform: none;
+  line-height: 1;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.info-tooltip__trigger:hover,
+.info-tooltip__trigger:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  outline: none;
+}
+
+.info-tooltip__bubble {
+  position: absolute;
+  left: 0;
+  width: max-content;
+  max-width: 260px;
+  background: var(--color-panel-background-elevated);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  text-align: left;
+  line-height: 1.4;
+  box-shadow: var(--shadow-panel);
+  z-index: 100;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.info-tooltip__bubble--top {
+  bottom: calc(100% + 6px);
+}
+
+.info-tooltip__bubble--bottom {
+  top: calc(100% + 6px);
+}
+
+.info-tooltip__trigger:hover + .info-tooltip__bubble,
+.info-tooltip__trigger:focus-visible + .info-tooltip__bubble {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ---------------------------------------------------------------------
    Estado de datos + botón de actualización (Fase 9a)
    --------------------------------------------------------------------- */
 

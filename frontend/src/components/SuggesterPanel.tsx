@@ -11,6 +11,8 @@
  */
 
 import type { SuggesterResponse } from "../types";
+import { InfoTooltip } from "./InfoTooltip";
+import { SUGGESTER_HELP } from "../helpTexts";
 import { DIRECTION_COLORS, VOTE_COLORS } from "../theme";
 
 interface SuggesterPanelProps {
@@ -43,7 +45,10 @@ export function SuggesterPanel({ data }: SuggesterPanelProps) {
 
   return (
     <aside className="suggester-panel">
-      <h2 className="panel-title">Sugeridor de consenso</h2>
+      <h2 className="panel-title">
+        Sugeridor de consenso
+        <InfoTooltip text={SUGGESTER_HELP} />
+      </h2>
 
       <div className="suggester-panel__suggestion" style={{ color }}>
         {data.sugerencia}

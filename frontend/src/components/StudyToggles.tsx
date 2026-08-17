@@ -7,7 +7,14 @@
  * overlays (ver `DEFAULT_ACTIVE_OVERLAYS`, usado por `App.tsx`) — nunca
  * todo encimado de entrada como el gráfico matplotlib de la Fase 7b; el
  * usuario agrega lo que quiera desde acá.
+ *
+ * Cada chip lleva un `InfoTooltip` (Fase 9b) con el texto de
+ * `../helpTexts.ts::OVERLAY_HELP` — qué mide cada overlay y cómo leerlo,
+ * redactado para no sugerir que algo sin edge demostrado predice el precio.
  */
+
+import { InfoTooltip } from "./InfoTooltip";
+import { OVERLAY_HELP } from "../helpTexts";
 
 export type OverlayKey =
   | "sma20"
@@ -45,6 +52,7 @@ export function StudyToggles({ active, onToggle }: StudyTogglesProps) {
         <label key={key} className={`toggle-chip${active.has(key) ? " toggle-chip--active" : ""}`}>
           <input type="checkbox" checked={active.has(key)} onChange={() => onToggle(key)} />
           {label}
+          <InfoTooltip text={OVERLAY_HELP[key]} placement="bottom" />
         </label>
       ))}
     </fieldset>
