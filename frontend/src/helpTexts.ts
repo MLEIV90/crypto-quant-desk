@@ -74,6 +74,11 @@ export const BACKTEST_EQUITY_HELP =
   "en paralelo. Muestra CÓMO se llegó al resultado final (con qué subidas y caídas en el camino), no solo el " +
   "número final.";
 
+export const WATCHLIST_HELP =
+  "Precio de cierre más reciente y variación % contra la vela diaria anterior de cada activo. Es el cambio " +
+  "entre las últimas DOS velas guardadas, no necesariamente las últimas 24hs de reloj si los datos no están " +
+  "recién actualizados — mirá el punto ámbar y 'Actualizar datos' arriba.";
+
 export const BACKTEST_METRIC_HELP: Record<string, string> = {
   cagr: "Crecimiento anual compuesto: a qué tasa anual equivalente creció el capital en promedio durante el período.",
   sharpe: "Retorno ajustado por riesgo: cuánto retorno se obtuvo por unidad de volatilidad asumida. Más alto es mejor; no distingue una caída brusca de una subida brusca.",

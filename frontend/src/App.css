@@ -185,6 +185,113 @@
 }
 
 /* ---------------------------------------------------------------------
+   Watchlist de mercado (Fase 10a)
+   --------------------------------------------------------------------- */
+
+.watchlist-panel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel-background);
+}
+
+.watchlist-panel__label {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-faint);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.watchlist-panel__list {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  flex: 1;
+}
+
+.watchlist-item {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  cursor: pointer;
+  min-width: 110px;
+  flex-shrink: 0;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.watchlist-item:hover {
+  border-color: var(--color-border-strong);
+}
+
+.watchlist-item--active {
+  border-color: var(--color-accent);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.watchlist-item__top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+}
+
+.watchlist-item__asset {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+
+.watchlist-item__stale-dot {
+  width: 6px;
+  height: 6px;
+  min-width: 6px;
+  border-radius: 50%;
+  background: var(--color-warning);
+}
+
+.watchlist-item__price {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.watchlist-item__change {
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.watchlist-item__change--up {
+  color: var(--color-success);
+}
+
+.watchlist-item__change--down {
+  color: var(--color-danger);
+}
+
+.watchlist-item__loading,
+.watchlist-item__error {
+  font-size: 0.75rem;
+  color: var(--color-text-faint);
+}
+
+/* ---------------------------------------------------------------------
    Estado de datos + botón de actualización (Fase 9a)
    --------------------------------------------------------------------- */
 
@@ -259,6 +366,52 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin: 0;
+}
+
+.panel-subtitle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* ---------------------------------------------------------------------
+   Selector de período histórico (Fase 10a)
+   --------------------------------------------------------------------- */
+
+.period-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.period-selector__pill {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.period-selector__pill:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.period-selector__pill--active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: rgba(56, 189, 248, 0.12);
+  font-weight: 700;
 }
 
 /* ---------------------------------------------------------------------

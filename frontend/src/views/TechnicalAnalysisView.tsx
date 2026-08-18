@@ -1,10 +1,17 @@
 /**
  * Vista "Análisis Técnico" (Fase 8b, extendida en 8c con el panel del
- * sugeridor y en 8d con alertas + dibujo). Chart + toggles vienen de 8b
- * tal cual; `SuggesterPanel` es de 8c. Lo nuevo en 8d: `AlertsPanel`
- * (reglas client-side sobre `/api/studies`) y `DrawingTools` (líneas sobre
- * el gráfico) — `Chart` expone su `IChartApi`/serie de velas vía
- * `onChartReady` para que `DrawingTools` dibuje sobre EL MISMO chart.
+ * sugeridor, en 8d con alertas + dibujo, y en 10a con el selector de
+ * período). Chart + toggles vienen de 8b tal cual; `SuggesterPanel` es de
+ * 8c. Fase 8d: `AlertsPanel` (reglas client-side sobre `/api/studies`) y
+ * `DrawingTools` (líneas sobre el gráfico) — `Chart` expone su
+ * `IChartApi`/serie de velas vía `onChartReady` para que `DrawingTools`
+ * dibuje sobre EL MISMO chart.
+ *
+ * Fase 10a: `CANDLE_LIMIT` fijo (300 velas, ~10 meses en diario) se
+ * reemplaza por `PeriodSelector` — el mismo `candleLimit` calculado se le
+ * pasa a `/api/ohlcv` Y `/api/studies`, así el precio y los osciladores
+ * (RSI/MACD/Estocástico) siempre grafican exactamente la misma ventana de
+ * velas y no se desincronizan entre sí al cambiar de período.
  */
 
 import { useCallback, useState } from "react";
@@ -15,11 +22,10 @@ import { AlertsPanel } from "../components/AlertsPanel";
 import { Chart } from "../components/Chart";
 import { DrawingTools } from "../components/DrawingTools";
 import { DEFAULT_ACTIVE_OSCILLATORS, OscillatorPanel, type OscillatorKey } from "../components/OscillatorPanel";
+import { candleLimitForPeriod, DEFAULT_PERIOD, PeriodSelector, type PeriodKey } from "../components/PeriodSelector";
 import { DEFAULT_ACTIVE_OVERLAYS, StudyToggles, type OverlayKey } from "../components/StudyToggles";
 import { SuggesterPanel } from "../components/SuggesterPanel";
 import { StatusMessage } from "../components/StatusMessage";
-
-const CANDLE_LIMIT = 300;
 
 function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
   const next = new Set(set);
@@ -41,6 +47,8 @@ export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisView
   const [activeOscillators, setActiveOscillators] = useState<Set<OscillatorKey>>(
     new Set(DEFAULT_ACTIVE_OSCILLATORS),
   );
+  const [period, setPeriod] = useState<PeriodKey>(DEFAULT_PERIOD);
+  const candleLimit = candleLimitForPeriod(period, interval);
   const [chartApi, setChartApi] = useState<{
     chart: IChartApi;
     series: ISeriesApi<"Candlestick", Time>;
@@ -54,12 +62,12 @@ export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisView
   );
 
   const ohlcvQuery = useQuery({
-    queryKey: ["ohlcv", asset, interval],
-    queryFn: () => getOhlcv(asset, interval, CANDLE_LIMIT),
+    queryKey: ["ohlcv", asset, interval, candleLimit],
+    queryFn: () => getOhlcv(asset, interval, candleLimit),
   });
   const studiesQuery = useQuery({
-    queryKey: ["studies", asset, interval],
-    queryFn: () => getStudies(asset, interval, CANDLE_LIMIT),
+    queryKey: ["studies", asset, interval, candleLimit],
+    queryFn: () => getStudies(asset, interval, candleLimit),
   });
   const suggesterQuery = useQuery({
     queryKey: ["suggester", asset, interval],
@@ -90,6 +98,7 @@ export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisView
       {!errorMessage && ohlcv && studies && (
         <div className="technical-layout">
           <div className="technical-layout__chart-col">
+            <PeriodSelector active={period} onChange={setPeriod} />
             <DrawingTools
               asset={asset}
               interval={interval}

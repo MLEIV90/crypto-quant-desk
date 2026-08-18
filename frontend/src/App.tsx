@@ -13,6 +13,7 @@ import { getAssets } from "./api";
 import { AssetSelector } from "./components/AssetSelector";
 import { DataStatusBar } from "./components/DataStatusBar";
 import { NavTabs, type ViewKey } from "./components/NavTabs";
+import { WatchlistPanel } from "./components/WatchlistPanel";
 import { TechnicalAnalysisView } from "./views/TechnicalAnalysisView";
 import { RiskView } from "./views/RiskView";
 import { BacktestView } from "./views/BacktestView";
@@ -58,6 +59,8 @@ function Dashboard() {
           showTimeframe={activeView === "tecnico"}
         />
       </header>
+
+      <WatchlistPanel assets={assets} activeAsset={asset} onSelectAsset={setAsset} />
 
       <DataStatusBar asset={asset} interval={dataStatusInterval} />
 

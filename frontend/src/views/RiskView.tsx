@@ -7,28 +7,39 @@
  * LENTO: ambos endpoints ajustan un modelo GARCH (ver `api/main.py`) —
  * el estado de carga lo avisa explícitamente, no se queda "pensando" en
  * silencio.
+ *
+ * Fase 10a: el gráfico de precio tenía un `PRICE_CANDLE_LIMIT` fijo (300
+ * velas) — ahora usa su PROPIO `PeriodSelector` (independiente del de
+ * Análisis Técnico, porque esta vista siempre opera en diario), default
+ * "Todo" para que se vea el histórico completo junto a la volatilidad
+ * GARCH (que ya se grafica entera, sin límite, más abajo).
  */
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getGarchSeries, getOhlcv, getRisk } from "../api";
 import { LineChartPanel } from "../components/LineChartPanel";
 import { MetricCard } from "../components/MetricCard";
+import { candleLimitForPeriod, PeriodSelector, type PeriodKey } from "../components/PeriodSelector";
 import { StatusMessage } from "../components/StatusMessage";
 import { RISK_INTRO_HELP, RISK_METRIC_HELP } from "../helpTexts";
 import { COLORS, DIRECTION_COLORS, REGIME_COLORS } from "../theme";
 
-const PRICE_CANDLE_LIMIT = 300;
+const RISK_INTERVAL = "1d"; // el modelo GARCH del proyecto es diario, ver api/main.py::DEFAULT_RISK_INTERVAL
 
 interface RiskViewProps {
   asset: string;
 }
 
 export function RiskView({ asset }: RiskViewProps) {
+  const [pricePeriod, setPricePeriod] = useState<PeriodKey>("todo");
+  const priceCandleLimit = candleLimitForPeriod(pricePeriod, RISK_INTERVAL);
+
   const riskQuery = useQuery({ queryKey: ["risk", asset], queryFn: () => getRisk(asset) });
   const garchQuery = useQuery({ queryKey: ["garch-series", asset], queryFn: () => getGarchSeries(asset) });
   const priceQuery = useQuery({
-    queryKey: ["ohlcv", asset, "1d", "risk-view"],
-    queryFn: () => getOhlcv(asset, "1d", PRICE_CANDLE_LIMIT),
+    queryKey: ["ohlcv", asset, RISK_INTERVAL, "risk-view", priceCandleLimit],
+    queryFn: () => getOhlcv(asset, RISK_INTERVAL, priceCandleLimit),
   });
 
   const risk = riskQuery.data;
@@ -93,7 +104,10 @@ export function RiskView({ asset }: RiskViewProps) {
 
       {!errorMessage && price && (
         <>
-          <h3 className="panel-subtitle">Precio ({asset})</h3>
+          <div className="panel-subtitle-row">
+            <h3 className="panel-subtitle">Precio ({asset})</h3>
+            <PeriodSelector active={pricePeriod} onChange={setPricePeriod} />
+          </div>
           <LineChartPanel
             series={[
               {
