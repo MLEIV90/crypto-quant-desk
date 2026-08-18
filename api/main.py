@@ -65,7 +65,7 @@ from models.garch import conditional_volatility, select_best_model, volatility_r
 from signals.engine import generate_positions, latest_recommendation
 from signals.indicators import add_all_indicators
 from signals.returns import log_returns, simple_returns
-from signals.studies import all_studies, stochastic
+from signals.studies import all_studies, ichimoku, stochastic
 from signals.suggester import suggest
 
 logger = logging.getLogger(__name__)
@@ -250,9 +250,10 @@ def get_studies(
     interval: str = "1d",
     limit: int = Query(500, gt=0, le=5000, description="Cantidad de velas más recientes a devolver"),
 ) -> StudiesResponse:
-    """Reutiliza `signals.indicators.add_all_indicators`, `signals.studies.stochastic`
-    y `signals.studies.all_studies` (Fase 7a) tal cual — mismos cálculos que
-    alimentan la pestaña "Análisis Técnico" del cockpit
+    """Reutiliza `signals.indicators.add_all_indicators` (incluye vwap/obv,
+    Fase 10b), `signals.studies.stochastic`, `signals.studies.ichimoku`
+    (Fase 10b) y `signals.studies.all_studies` (Fase 7a) tal cual — mismos
+    cálculos que alimentan la pestaña "Análisis Técnico" del cockpit
     (`app.workers.StudiesWorker`), acá expuestos como series completas (no
     solo la última vela) para que el frontend las grafique/toggee.
     """
@@ -260,11 +261,13 @@ def get_studies(
 
     indicators_df = add_all_indicators(df)
     stoch_df = stochastic(df["high"], df["low"], df["close"])
+    ichimoku_df = ichimoku(df["high"], df["low"], df["close"])
     resumen = all_studies(df)
 
     recent = df.tail(limit)
     recent_indicators = indicators_df.loc[recent.index]
     recent_stoch = stoch_df.loc[recent.index]
+    recent_ichimoku = ichimoku_df.loc[recent.index]
 
     return StudiesResponse(
         asset=asset,
@@ -283,6 +286,13 @@ def get_studies(
         macd_hist=_series_to_list(recent_indicators["macd_hist"]),
         stoch_k=_series_to_list(recent_stoch["stoch_k"]),
         stoch_d=_series_to_list(recent_stoch["stoch_d"]),
+        vwap=_series_to_list(recent_indicators["vwap"]),
+        obv=_series_to_list(recent_indicators["obv"]),
+        ichimoku_tenkan=_series_to_list(recent_ichimoku["tenkan"]),
+        ichimoku_kijun=_series_to_list(recent_ichimoku["kijun"]),
+        ichimoku_senkou_a=_series_to_list(recent_ichimoku["senkou_a"]),
+        ichimoku_senkou_b=_series_to_list(recent_ichimoku["senkou_b"]),
+        ichimoku_chikou=_series_to_list(recent_ichimoku["chikou"]),
         fibonacci=resumen["fibonacci"],
         soporte_resistencia=resumen["soporte_resistencia"],
         pivotes=resumen["pivotes"],

@@ -28,7 +28,10 @@ pero NUNCA debe usarse como feature de un modelo entrenado ni como señal de
 trading en tiempo real sin rediseñarla para ser trailing. `fibonacci_levels`
 y `pivot_points` toman niveles ya elegidos (escalares) y no tienen problema
 de causalidad en sí mismas — el problema de causalidad, si existe, está en
-CÓMO se elige el swing/período de referencia que se les pasa.
+CÓMO se elige el swing/período de referencia que se les pasa. `ichimoku`
+(Fase 10b) se suma a la lista de casos NO trailing: su línea `chikou` usa
+`close` FUTURO respecto de cada fecha (ver su propio docstring) — mismo
+criterio que `swing_points`, solo para lectura visual retrospectiva.
 """
 
 from __future__ import annotations
@@ -54,6 +57,9 @@ DEFAULT_SR_WINDOW: int = 20
 DEFAULT_STOCH_K: int = 14
 DEFAULT_STOCH_D: int = 3
 DEFAULT_ADX_WINDOW: int = 14
+DEFAULT_ICHIMOKU_TENKAN: int = 9
+DEFAULT_ICHIMOKU_KIJUN: int = 26
+DEFAULT_ICHIMOKU_SENKOU_B: int = 52
 
 
 def _format_ratio(ratio: float) -> str:
@@ -312,6 +318,75 @@ def pivot_points(high: float, low: float, close: float) -> dict[str, float]:
     }
 
 
+def ichimoku(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    tenkan_window: int = DEFAULT_ICHIMOKU_TENKAN,
+    kijun_window: int = DEFAULT_ICHIMOKU_KIJUN,
+    senkou_b_window: int = DEFAULT_ICHIMOKU_SENKOU_B,
+) -> pd.DataFrame:
+    """Sistema Ichimoku Kinko Hyo (períodos convencionales 9/26/52).
+
+    HONESTIDAD (ver CONTEXTO HONESTO del módulo): Ichimoku es POPULAR
+    entre traders técnicos, pero SIN respaldo estadístico de edge probado
+    en este proyecto — es una herramienta de lectura visual de tendencia y
+    soporte/resistencia, no una señal predictiva.
+
+    Cinco líneas:
+    - tenkan (línea de conversión): promedio del máximo y el mínimo de los
+      últimos `tenkan_window` períodos. La más rápida de las cinco.
+    - kijun (línea base): igual que tenkan pero con `kijun_window`
+      períodos — más lenta, funciona como referencia de tendencia de
+      mediano plazo.
+    - senkou_a (span A, un borde de la nube): promedio de tenkan y kijun,
+      DESPLAZADO `kijun_window` períodos hacia ADELANTE.
+    - senkou_b (span B, el otro borde de la nube): promedio del máximo y
+      el mínimo de los últimos `senkou_b_window` períodos, desplazado
+      `kijun_window` períodos hacia adelante.
+    - chikou (línea rezagada): el `close` actual, desplazado
+      `kijun_window` períodos hacia ATRÁS.
+
+    LA NUBE ("kumo") es el área entre senkou_a y senkou_b — cuando
+    senkou_a > senkou_b algunos traders la leen como alcista (y viceversa);
+    el frontend la dibuja rellenando el área entre ambas líneas.
+
+    CAUSALIDAD de senkou_a/senkou_b: el desplazamiento hacia adelante NO
+    es lookahead — `senkou_a[t]` es el promedio de tenkan/kijun calculado
+    con datos disponibles hasta `t - kijun_window`, solo reubicado
+    `kijun_window` posiciones más adelante (la convención estándar del
+    indicador). Esta implementación reubica esos valores DENTRO del rango
+    de fechas ya existente — a diferencia de un gráfico Ichimoku
+    tradicional, que suele extender la nube más allá de la última vela
+    real (fechas futuras), acá no se fabrican fechas nuevas: no se ve esa
+    proyección más allá de la última fecha disponible.
+
+    CAUSALIDAD de chikou: es EXACTAMENTE LO OPUESTO — `chikou[t] =
+    close[t + kijun_window]`, información del FUTURO respecto de `t`. Es
+    deliberado (la convención estándar de la línea rezagada, para comparar
+    el precio actual contra el de `kijun_window` períodos atrás) pero NO
+    es trailing: mismo criterio que `swing_points` (ver CAUSALIDAD del
+    módulo) — solo para lectura visual retrospectiva, nunca como feature
+    de un modelo ni señal en tiempo real. Por construcción, sus últimos
+    `kijun_window` valores son siempre NaN (no hay close futuro todavía).
+
+    Devuelve un `pd.DataFrame` con columnas ["tenkan", "kijun", "senkou_a",
+    "senkou_b", "chikou"], mismo índice que `high`/`low`/`close`.
+    """
+    tenkan = (high.rolling(window=tenkan_window).max() + low.rolling(window=tenkan_window).min()) / 2.0
+    kijun = (high.rolling(window=kijun_window).max() + low.rolling(window=kijun_window).min()) / 2.0
+    senkou_a = ((tenkan + kijun) / 2.0).shift(kijun_window)
+    senkou_b = (
+        (high.rolling(window=senkou_b_window).max() + low.rolling(window=senkou_b_window).min()) / 2.0
+    ).shift(kijun_window)
+    chikou = close.shift(-kijun_window)
+
+    return pd.DataFrame(
+        {"tenkan": tenkan, "kijun": kijun, "senkou_a": senkou_a, "senkou_b": senkou_b, "chikou": chikou},
+        index=close.index,
+    )
+
+
 def all_studies(df: pd.DataFrame) -> dict:
     """Corre TODOS los estudios de este módulo más los de
     `signals.indicators.add_all_indicators` (reutilizado, no reimplementado)
@@ -330,9 +405,13 @@ def all_studies(df: pd.DataFrame) -> dict:
     para proyectar el que viene).
 
     Devuelve un dict con las claves "fecha", "precio", "indicadores"
-    (rsi_14/macd/macd_signal/macd_hist/bb_pct_b/bb_zscore/sma_20/sma_50/atr_14),
-    "estocastico" ({"k":..., "d":...}), "adx", "soporte_resistencia",
-    "pivotes", "fibonacci" (o `None`).
+    (rsi_14/macd/macd_signal/macd_hist/bb_pct_b/bb_zscore/sma_20/sma_50/
+    atr_14/vwap/obv — las últimas dos, Fase 10b), "estocastico"
+    ({"k":..., "d":...}), "adx", "ichimoku" (Fase 10b, últimos valores de
+    tenkan/kijun/senkou_a/senkou_b/chikou — "chikou" suele salir `None`
+    acá, ver su docstring: sus últimos `kijun_window` valores son siempre
+    NaN por construcción), "soporte_resistencia", "pivotes", "fibonacci"
+    (o `None`).
     """
     from signals.indicators import add_all_indicators
 
@@ -340,6 +419,7 @@ def all_studies(df: pd.DataFrame) -> dict:
     indicators_df = add_all_indicators(df)
     stoch_df = stochastic(high, low, close)
     adx_series = adx(high, low, close)
+    ichimoku_df = ichimoku(high, low, close)
     swings = swing_points(high, low, close)
 
     last_swing_high = swings["swing_high"].dropna()
@@ -373,9 +453,18 @@ def all_studies(df: pd.DataFrame) -> dict:
             "sma_20": _last_or_none(indicators_df["sma_20"]),
             "sma_50": _last_or_none(indicators_df["sma_50"]),
             "atr_14": _last_or_none(indicators_df["atr_14"]),
+            "vwap": _last_or_none(indicators_df["vwap"]),
+            "obv": _last_or_none(indicators_df["obv"]),
         },
         "estocastico": {"k": _last_or_none(stoch_df["stoch_k"]), "d": _last_or_none(stoch_df["stoch_d"])},
         "adx": _last_or_none(adx_series),
+        "ichimoku": {
+            "tenkan": _last_or_none(ichimoku_df["tenkan"]),
+            "kijun": _last_or_none(ichimoku_df["kijun"]),
+            "senkou_a": _last_or_none(ichimoku_df["senkou_a"]),
+            "senkou_b": _last_or_none(ichimoku_df["senkou_b"]),
+            "chikou": _last_or_none(ichimoku_df["chikou"]),
+        },
         "soporte_resistencia": support_resistance(close, high, low),
         "pivotes": pivots,
         "fibonacci": fibonacci,

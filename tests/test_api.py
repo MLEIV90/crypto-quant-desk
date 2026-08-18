@@ -111,14 +111,23 @@ def test_get_studies_returns_series_aligned_to_fechas() -> None:
     for campo in (
         "sma_20", "sma_50", "ema_12", "ema_26", "bb_upper", "bb_mid", "bb_lower",
         "rsi_14", "macd", "macd_signal", "macd_hist", "stoch_k", "stoch_d",
+        "vwap", "obv", "ichimoku_tenkan", "ichimoku_kijun", "ichimoku_senkou_a",
+        "ichimoku_senkou_b", "ichimoku_chikou",
     ):
         assert len(body[campo]) == n
 
     assert set(body["pivotes"].keys()) == {"P", "R1", "R2", "R3", "S1", "S2", "S3"}
     assert set(body["soporte_resistencia"].keys()) == {"resistencia", "soporte", "precio_actual"}
-    # con 120 velas ya pasó el warmup de rsi/ema: no debería haber NaN (null) al final
+    # con 120 velas ya pasó el warmup de rsi/ema/vwap/ichimoku: no debería haber NaN (null) al final
     assert body["rsi_14"][-1] is not None
     assert body["ema_12"][-1] is not None
+    assert body["vwap"][-1] is not None
+    assert body["obv"][-1] is not None
+    assert body["ichimoku_tenkan"][-1] is not None
+    assert body["ichimoku_senkou_a"][-1] is not None
+    # chikou en la última vela es SIEMPRE None por construcción (usa close
+    # futuro que todavía no existe) — no es un fallo, ver signals/studies.py::ichimoku.
+    assert body["ichimoku_chikou"][-1] is None
 
 
 def test_get_studies_unknown_asset_returns_404() -> None:

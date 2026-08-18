@@ -24,13 +24,21 @@ export const OVERLAY_HELP: Record<OverlayKey, string> = {
   fibonacci: "Niveles de retroceso/extensión populares entre traders técnicos, calculados sobre un máximo y un mínimo reciente. SIN respaldo estadístico probado en este proyecto — es una referencia visual, no una regla.",
   supportResistance: "Zonas de precio donde el activo rebotó o se frenó recientemente. Que haya pasado antes no garantiza que vuelva a pasar — es una referencia visual, no una predicción.",
   pivots: "Niveles calculados a partir del rango (alto/bajo/cierre) de la vela anterior. Muy usados en trading de corto plazo; el precio puede perforarlos sin aviso.",
+  vwap: "Precio promedio ponderado por volumen (ventana móvil de 20 velas). Referencia de 'valor justo' reciente — no predice hacia dónde va el precio.",
+  ichimoku: "Sistema de líneas y una 'nube' que algunos traders usan para leer tendencia y soporte/resistencia. Popular, pero sin respaldo estadístico de edge probado en este proyecto.",
 };
 
 export const OSCILLATOR_HELP: Record<OscillatorKey, string> = {
   rsi: "Mide si el activo está sobrecomprado (>70) o sobrevendido (<30) según la velocidad y magnitud de los cambios de precio recientes. No predice: muestra momentum reciente, nada más.",
   macd: "Diferencia entre la EMA 12 y la EMA 26 del precio, con su propia media de señal. Un cruce entre la línea MACD y su señal se lee como cambio de momentum — no es una señal de compra/venta garantizada.",
   stochastic: "Compara el cierre actual contra el rango de precios reciente, en una escala de 0 a 100. Por encima de 80 sugiere sobrecompra, por debajo de 20 sobreventa — mide momentum, igual que el RSI, no anticipa el precio.",
+  obv: "Acumula el volumen sumándolo o restándolo según el precio suba o baje. Se usa para ver si el volumen acompaña al movimiento del precio — no anticipa el precio en sí.",
 };
+
+export const CHART_TYPE_HELP =
+  "Heikin-Ashi suaviza las velas promediando cada una con la anterior, para que las tendencias se vean más " +
+  "limpias. El open/high/low/close de cada vela deja de ser el precio real negociado — para ver el precio " +
+  "exacto, volvé a 'Velas'.";
 
 export const RISK_INTRO_HELP =
   "Estas son medidas de RIESGO calculadas sobre la historia del activo — ninguna predice el precio de mañana. " +

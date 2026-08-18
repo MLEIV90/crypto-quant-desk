@@ -52,6 +52,13 @@ export interface StudiesResponse {
   macd_hist: (number | null)[];
   stoch_k: (number | null)[];
   stoch_d: (number | null)[];
+  vwap: (number | null)[];
+  obv: (number | null)[];
+  ichimoku_tenkan: (number | null)[];
+  ichimoku_kijun: (number | null)[];
+  ichimoku_senkou_a: (number | null)[];
+  ichimoku_senkou_b: (number | null)[];
+  ichimoku_chikou: (number | null)[];
   fibonacci: Record<string, number> | null;
   soporte_resistencia: SoporteResistencia;
   pivotes: Record<string, number>;

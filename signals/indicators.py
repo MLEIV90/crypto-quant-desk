@@ -9,7 +9,10 @@ no en tiempo calendario.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+
+DEFAULT_VWAP_WINDOW = 20
 
 
 def sma(series: pd.Series, window: int) -> pd.Series:
@@ -124,6 +127,61 @@ def atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> 
     return true_range.ewm(alpha=1.0 / window, min_periods=window, adjust=False).mean()
 
 
+def vwap(
+    high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, window: int = DEFAULT_VWAP_WINDOW
+) -> pd.Series:
+    """VWAP (Volume Weighted Average Price) en VENTANA MÓVIL de `window`
+    velas — NO acumulado desde el inicio de la serie.
+
+    ELECCIÓN DE DISEÑO (documentada, ver Fase 10a/10b): el VWAP "clásico"
+    intradía se acumula desde la apertura de una sesión de mercado y se
+    reinicia cada día — no aplica tal cual acá, porque este proyecto
+    trabaja con velas diarias/horarias de un mercado (cripto) que opera
+    24/7, sin sesiones que reiniciar. Un VWAP acumulado desde el inicio de
+    TODA la serie (años de historia en algunos activos) se volvería casi
+    plano con el tiempo y perdería utilidad como referencia de precio
+    reciente. Esta versión es una ventana móvil: funciona como una media
+    móvil ponderada por volumen (en vez de una media simple como la SMA),
+    dándole más peso a las velas de mayor actividad dentro de la ventana.
+
+        precio_típico_t = (high_t + low_t + close_t) / 3
+        VWAP_t = sum(precio_típico * volume, últimas `window` velas)
+                 / sum(volume, últimas `window` velas)
+
+    TRAILING por construcción (rolling hacia atrás) — sin lookahead. Si
+    `volume` viene en NaN (fuentes de solo-cierre como CoinMetrics/
+    CoinGecko, ver data.loaders) o la suma de volumen de la ventana es 0,
+    el resultado queda en NaN — no se inventa un peso uniforme como
+    sustituto.
+    """
+    typical_price = (high + low + close) / 3.0
+    sum_price_volume = (typical_price * volume).rolling(window=window).sum()
+    sum_volume = volume.rolling(window=window).sum()
+    return pd.Series(np.where(sum_volume > 0.0, sum_price_volume / sum_volume, np.nan), index=close.index)
+
+
+def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """On Balance Volume (OBV): acumula el volumen con signo según haya
+    subido o bajado el cierre respecto a la vela anterior.
+
+        signo_t = +1 si close_t > close_{t-1}
+                  -1 si close_t < close_{t-1}
+                   0 si close_t == close_{t-1}
+        OBV_t = OBV_{t-1} + signo_t * volume_t     (OBV en la primera vela = volume_0)
+
+    Es un ACUMULADO, no un oscilador con rango fijo — se interpreta por su
+    PENDIENTE/tendencia ("¿el volumen acompaña al movimiento del precio?"),
+    no por su nivel absoluto (que no tiene una escala "buena" o "mala" en
+    sí misma). Si `volume` viene en NaN (fuentes de solo-cierre, ver
+    data.loaders), esa vela queda en NaN y el acumulado sigue desde la
+    última vela válida (`Series.cumsum` con `skipna=True`, el default).
+    """
+    direction = np.sign(close.diff())
+    signed_volume = direction * volume
+    signed_volume.iloc[0] = volume.iloc[0]
+    return signed_volume.cumsum()
+
+
 def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Agrega columnas de indicadores técnicos a un DataFrame OHLCV
     estandarizado (el que devuelve `data.loaders.get_prices`).
@@ -131,7 +189,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     No modifica `df` in-place: devuelve una copia con las columnas agregadas
     ["sma_20", "sma_50", "ema_12", "ema_26", "rsi_14", "macd", "macd_signal",
     "macd_hist", "bb_mid", "bb_upper", "bb_lower", "bb_pct_b", "bb_bandwidth",
-    "bb_zscore", "atr_14"].
+    "bb_zscore", "atr_14", "vwap", "obv"] (las últimas dos, Fase 10b).
     """
     out = df.copy()
     close = out["close"]
@@ -156,5 +214,8 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["bb_zscore"] = bb_df["zscore"]
 
     out["atr_14"] = atr(out["high"], out["low"], out["close"], window=14)
+
+    out["vwap"] = vwap(out["high"], out["low"], out["close"], out["volume"])
+    out["obv"] = obv(out["close"], out["volume"])
 
     return out

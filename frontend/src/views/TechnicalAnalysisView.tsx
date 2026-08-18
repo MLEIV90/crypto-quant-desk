@@ -12,6 +12,8 @@
  * pasa a `/api/ohlcv` Y `/api/studies`, así el precio y los osciladores
  * (RSI/MACD/Estocástico) siempre grafican exactamente la misma ventana de
  * velas y no se desincronizan entre sí al cambiar de período.
+ *
+ * Fase 10b: `ChartTypeSelector` (velas / Heikin-Ashi) al lado del período.
  */
 
 import { useCallback, useState } from "react";
@@ -20,6 +22,7 @@ import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { ApiError, getOhlcv, getStudies, getSuggester } from "../api";
 import { AlertsPanel } from "../components/AlertsPanel";
 import { Chart } from "../components/Chart";
+import { ChartTypeSelector, DEFAULT_CHART_TYPE, type ChartTypeKey } from "../components/ChartTypeSelector";
 import { DrawingTools } from "../components/DrawingTools";
 import { DEFAULT_ACTIVE_OSCILLATORS, OscillatorPanel, type OscillatorKey } from "../components/OscillatorPanel";
 import { candleLimitForPeriod, DEFAULT_PERIOD, PeriodSelector, type PeriodKey } from "../components/PeriodSelector";
@@ -49,6 +52,7 @@ export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisView
   );
   const [period, setPeriod] = useState<PeriodKey>(DEFAULT_PERIOD);
   const candleLimit = candleLimitForPeriod(period, interval);
+  const [chartType, setChartType] = useState<ChartTypeKey>(DEFAULT_CHART_TYPE);
   const [chartApi, setChartApi] = useState<{
     chart: IChartApi;
     series: ISeriesApi<"Candlestick", Time>;
@@ -98,7 +102,10 @@ export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisView
       {!errorMessage && ohlcv && studies && (
         <div className="technical-layout">
           <div className="technical-layout__chart-col">
-            <PeriodSelector active={period} onChange={setPeriod} />
+            <div className="chart-controls-row">
+              <ChartTypeSelector active={chartType} onChange={setChartType} />
+              <PeriodSelector active={period} onChange={setPeriod} />
+            </div>
             <DrawingTools
               asset={asset}
               interval={interval}
@@ -110,6 +117,7 @@ export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisView
               studies={studies}
               activeOverlays={activeOverlays}
               activeOscillators={activeOscillators}
+              chartType={chartType}
               onChartReady={handleChartReady}
             />
           </div>

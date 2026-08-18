@@ -65,6 +65,15 @@ class StudiesResponse(BaseModel):
     macd_hist: list[float | None]
     stoch_k: list[float | None]
     stoch_d: list[float | None]
+    vwap: list[float | None] = Field(description="VWAP en ventana móvil de 20 velas — ver signals/indicators.py::vwap")
+    obv: list[float | None] = Field(description="On Balance Volume acumulado — ver signals/indicators.py::obv")
+    ichimoku_tenkan: list[float | None] = Field(description="Línea de conversión Ichimoku (9 períodos)")
+    ichimoku_kijun: list[float | None] = Field(description="Línea base Ichimoku (26 períodos)")
+    ichimoku_senkou_a: list[float | None] = Field(description="Span A Ichimoku (borde de la nube), desplazado 26 períodos hacia adelante")
+    ichimoku_senkou_b: list[float | None] = Field(description="Span B Ichimoku (borde de la nube), desplazado 26 períodos hacia adelante")
+    ichimoku_chikou: list[float | None] = Field(
+        description="Línea rezagada Ichimoku — usa close FUTURO (ver signals/studies.py::ichimoku), solo para lectura visual retrospectiva"
+    )
     fibonacci: dict[str, float] | None = Field(
         default=None, description="Retrocesos/extensiones de Fibonacci — SIN respaldo predictivo probado, ver signals/studies.py"
     )

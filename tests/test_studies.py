@@ -10,6 +10,7 @@ from signals.studies import (
     adx,
     all_studies,
     fibonacci_levels,
+    ichimoku,
     pivot_points,
     stochastic,
     support_resistance,
@@ -183,6 +184,53 @@ def test_pivot_points_matches_classic_formula() -> None:
 
 
 # --------------------------------------------------------------------------
+# ichimoku
+# --------------------------------------------------------------------------
+
+
+def test_ichimoku_returns_expected_columns() -> None:
+    df = _synthetic_ohlcv_oscillating(n=200, seed=5)
+    out = ichimoku(df["high"], df["low"], df["close"])
+
+    assert list(out.columns) == ["tenkan", "kijun", "senkou_a", "senkou_b", "chikou"]
+    assert len(out) == len(df)
+
+
+def test_ichimoku_tenkan_matches_manual_high_low_average() -> None:
+    df = _synthetic_ohlcv_oscillating(n=60, seed=6)
+    out = ichimoku(df["high"], df["low"], df["close"], tenkan_window=9)
+
+    expected_tenkan = (df["high"].rolling(9).max() + df["low"].rolling(9).min()) / 2.0
+    pd.testing.assert_series_equal(out["tenkan"], expected_tenkan, check_names=False)
+
+
+def test_ichimoku_senkou_a_is_shifted_forward_and_not_lookahead() -> None:
+    # senkou_a[t] debe ser exactamente (tenkan+kijun)/2 calculado en
+    # t - kijun_window (dato ya disponible en ese momento) — no algo nuevo
+    # inventado en la posición desplazada.
+    df = _synthetic_ohlcv_oscillating(n=120, seed=7)
+    kijun_window = 26
+    out = ichimoku(df["high"], df["low"], df["close"], kijun_window=kijun_window)
+
+    raw_senkou_a = (out["tenkan"] + out["kijun"]) / 2.0
+    shifted = raw_senkou_a.shift(kijun_window)
+    pd.testing.assert_series_equal(out["senkou_a"], shifted, check_names=False)
+
+
+def test_ichimoku_chikou_uses_future_close_and_tail_is_nan() -> None:
+    # chikou[t] = close[t + kijun_window]: comparar contra un shift(-kijun_window)
+    # manual, y confirmar que los últimos kijun_window valores son NaN (no
+    # hay close futuro más allá del final de la serie).
+    df = _synthetic_ohlcv_oscillating(n=60, seed=8)
+    kijun_window = 26
+    out = ichimoku(df["high"], df["low"], df["close"], kijun_window=kijun_window)
+
+    expected_chikou = df["close"].shift(-kijun_window)
+    pd.testing.assert_series_equal(out["chikou"], expected_chikou, check_names=False)
+    assert out["chikou"].iloc[-kijun_window:].isna().all()
+
+
+# --------------------------------------------------------------------------
 # all_studies
 # --------------------------------------------------------------------------
 
@@ -192,13 +240,18 @@ def test_all_studies_returns_expected_structure() -> None:
     summary = all_studies(df)
 
     assert set(summary.keys()) == {
-        "fecha", "precio", "indicadores", "estocastico", "adx",
+        "fecha", "precio", "indicadores", "estocastico", "adx", "ichimoku",
         "soporte_resistencia", "pivotes", "fibonacci",
     }
     assert set(summary["indicadores"].keys()) == {
         "rsi_14", "macd", "macd_signal", "macd_hist", "bb_pct_b", "bb_zscore", "sma_20", "sma_50", "atr_14",
+        "vwap", "obv",
     }
     assert set(summary["estocastico"].keys()) == {"k", "d"}
+    assert set(summary["ichimoku"].keys()) == {"tenkan", "kijun", "senkou_a", "senkou_b", "chikou"}
     assert set(summary["pivotes"].keys()) == {"P", "R1", "R2", "R3", "S1", "S2", "S3"}
     assert summary["fecha"] == df.index[-1]
     assert summary["precio"] == pytest.approx(df["close"].iloc[-1])
+    # chikou en la última vela es siempre None por construcción (usa close
+    # futuro, ver ichimoku()) — no es un bug, está documentado.
+    assert summary["ichimoku"]["chikou"] is None

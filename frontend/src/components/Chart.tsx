@@ -19,10 +19,16 @@
  * y la serie de velas apenas se crean (y `null` al desmontar) para que
  * `DrawingTools` pueda dibujar sobre EL MISMO chart — este componente no
  * sabe nada de dibujo, solo expone el handle.
+ *
+ * `chartType` (Fase 10b): "candles" (velas reales) o "heikin-ashi"
+ * (`../heikinAshi.ts`, transformación puramente visual calculada en el
+ * frontend) — solo cambia qué OHLC recibe la serie de velas; los overlays/
+ * osciladores siguen usando el precio real de `/api/studies` siempre.
  */
 
 import { useEffect, useRef } from "react";
 import {
+  AreaSeries,
   CandlestickSeries,
   ColorType,
   createChart,
@@ -31,10 +37,12 @@ import {
   LineSeries,
   LineStyle,
 } from "lightweight-charts";
-import type { IChartApi, IPaneApi, ISeriesApi, Time, UTCTimestamp } from "lightweight-charts";
+import type { IChartApi, IPaneApi, ISeriesApi, SeriesType, Time, UTCTimestamp } from "lightweight-charts";
 import type { OHLCVResponse, StudiesResponse } from "../types";
+import type { ChartTypeKey } from "./ChartTypeSelector";
 import type { OverlayKey } from "./StudyToggles";
 import type { OscillatorKey } from "./OscillatorPanel";
+import { toHeikinAshi } from "../heikinAshi";
 import { COLORS } from "../theme";
 
 interface ChartProps {
@@ -42,13 +50,16 @@ interface ChartProps {
   studies: StudiesResponse;
   activeOverlays: Set<OverlayKey>;
   activeOscillators: Set<OscillatorKey>;
+  chartType: ChartTypeKey;
   onChartReady?: (chart: IChartApi | null, candleSeries: ISeriesApi<"Candlestick", Time> | null) => void;
 }
 
 type LineSeriesApi = ISeriesApi<"Line", Time>;
 
 interface OverlayArtifact {
-  series: LineSeriesApi[];
+  // Union amplia (no solo "Line") porque Ichimoku usa Area series para
+  // aproximar el relleno de la nube — ver el caso "ichimoku" más abajo.
+  series: ISeriesApi<SeriesType, Time>[];
   priceLines: { series: ISeriesApi<"Candlestick", Time>; line: ReturnType<LineSeriesApi["createPriceLine"]> }[];
 }
 
@@ -180,6 +191,53 @@ function createOverlay(
         }));
       return { series: [], priceLines };
     }
+    case "vwap": {
+      const series = chart.addSeries(LineSeries, {
+        color: COLORS.vwap, lineWidth: 2, title: "VWAP", priceLineVisible: false, lastValueVisible: false,
+      });
+      series.setData(toLineData(studies.fechas, studies.vwap));
+      return { series: [series], priceLines: [] };
+    }
+    case "ichimoku": {
+      const tenkan = chart.addSeries(LineSeries, {
+        color: COLORS.ichimokuTenkan, lineWidth: 1, title: "Tenkan", priceLineVisible: false, lastValueVisible: false,
+      });
+      tenkan.setData(toLineData(studies.fechas, studies.ichimoku_tenkan));
+
+      const kijun = chart.addSeries(LineSeries, {
+        color: COLORS.ichimokuKijun, lineWidth: 1, title: "Kijun", priceLineVisible: false, lastValueVisible: false,
+      });
+      kijun.setData(toLineData(studies.fechas, studies.ichimoku_kijun));
+
+      const chikou = chart.addSeries(LineSeries, {
+        color: COLORS.ichimokuChikou, lineWidth: 1, lineStyle: LineStyle.Dotted, title: "Chikou",
+        priceLineVisible: false, lastValueVisible: false,
+      });
+      chikou.setData(toLineData(studies.fechas, studies.ichimoku_chikou));
+
+      // La "nube" (kumo): lightweight-charts (versión gratuita) no trae una
+      // primitiva nativa de "relleno entre dos líneas arbitrarias" (eso
+      // sería un plugin/primitive custom) — se aproxima superponiendo dos
+      // Area series semitransparentes con degradado hacia sus lados
+      // OPUESTOS (`invertFilledArea`): donde ambos degradados se solapan
+      // (justo la banda entre senkou_a y senkou_b) el color se refuerza y
+      // se nota más que en el resto del gráfico, donde cada degradado se
+      // desvanece a transparente lejos de su propia línea.
+      const senkouA = chart.addSeries(AreaSeries, {
+        lineColor: COLORS.ichimokuSenkouA, lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
+        title: "Senkou A", topColor: "rgba(34, 197, 94, 0.16)", bottomColor: "rgba(34, 197, 94, 0)",
+      });
+      senkouA.setData(toLineData(studies.fechas, studies.ichimoku_senkou_a));
+
+      const senkouB = chart.addSeries(AreaSeries, {
+        lineColor: COLORS.ichimokuSenkouB, lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
+        title: "Senkou B", invertFilledArea: true,
+        topColor: "rgba(239, 68, 68, 0)", bottomColor: "rgba(239, 68, 68, 0.16)",
+      });
+      senkouB.setData(toLineData(studies.fechas, studies.ichimoku_senkou_b));
+
+      return { series: [tenkan, kijun, chikou, senkouA, senkouB], priceLines: [] };
+    }
     default:
       return empty;
   }
@@ -231,6 +289,11 @@ function createOscillator(chart: IChartApi, key: OscillatorKey, studies: Studies
     dLine.setData(toLineData(studies.fechas, studies.stoch_d));
     addReferenceLine(kLine, 80);
     addReferenceLine(kLine, 20);
+  } else if (key === "obv") {
+    const obvLine = pane.addSeries(LineSeries, {
+      color: COLORS.obv, lineWidth: 2, title: "OBV", priceLineVisible: false, lastValueVisible: false,
+    });
+    obvLine.setData(toLineData(studies.fechas, studies.obv));
   }
 
   return { pane };
@@ -240,7 +303,7 @@ function removeOscillator(chart: IChartApi, artifact: OscillatorArtifact): void 
   chart.removePane(artifact.pane.paneIndex());
 }
 
-export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, onChartReady }: ChartProps) {
+export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, chartType, onChartReady }: ChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
@@ -284,12 +347,16 @@ export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, onCha
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Velas: se recargan cuando cambia el activo/timeframe/ventana.
+  // Velas: se recargan cuando cambia el activo/timeframe/ventana/tipo de
+  // gráfico. Heikin-Ashi (Fase 10b) transforma el OHLC ACÁ, justo antes de
+  // graficarlo — overlays/osciladores (más abajo) nunca ven estos valores
+  // transformados, siguen leyendo el precio real de `studies`.
   useEffect(() => {
     const candleSeries = candleSeriesRef.current;
     if (!candleSeries) return;
+    const candles = chartType === "heikin-ashi" ? toHeikinAshi(ohlcv.velas) : ohlcv.velas;
     candleSeries.setData(
-      ohlcv.velas.map((vela) => ({
+      candles.map((vela) => ({
         time: toTimestamp(vela.fecha),
         open: vela.open,
         high: vela.high,
@@ -298,7 +365,7 @@ export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, onCha
       })),
     );
     chartRef.current?.timeScale().fitContent();
-  }, [ohlcv]);
+  }, [ohlcv, chartType]);
 
   // Overlays: se reconstruyen ENTEROS cuando cambia qué overlays están
   // activos o cuando cambian los datos de estudios (nuevo activo/

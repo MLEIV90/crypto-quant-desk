@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from signals.indicators import add_all_indicators, atr, bollinger_bands, ema, macd, rsi, sma
+from signals.indicators import add_all_indicators, atr, bollinger_bands, ema, macd, obv, rsi, sma, vwap
 
 
 def _monotonic_close(n: int = 60, start: float = 100.0, step: float = 1.0) -> pd.Series:
@@ -136,6 +136,74 @@ def test_atr_is_non_negative() -> None:
 
 
 # --------------------------------------------------------------------------
+# VWAP
+# --------------------------------------------------------------------------
+
+
+def test_vwap_matches_manual_calculation_on_constant_volume() -> None:
+    n = 30
+    idx = pd.date_range("2021-01-01", periods=n, freq="D")
+    close = pd.Series(100 + np.cumsum(np.random.default_rng(10).normal(0, 1, n)), index=idx)
+    high = close + 1.0
+    low = close - 1.0
+    volume = pd.Series(1000.0, index=idx)
+
+    result = vwap(high, low, close, volume, window=10)
+
+    typical_price = (high + low + close) / 3.0
+    expected = typical_price.rolling(window=10).mean()  # con volumen constante, VWAP == SMA del precio típico
+    pd.testing.assert_series_equal(result, expected, check_names=False)
+
+
+def test_vwap_weights_high_volume_candles_more() -> None:
+    idx = pd.date_range("2021-01-01", periods=3, freq="D")
+    high = pd.Series([10.0, 10.0, 20.0], index=idx)
+    low = high.copy()
+    close = high.copy()
+    volume = pd.Series([1.0, 1.0, 100.0], index=idx)  # última vela domina por volumen
+
+    result = vwap(high, low, close, volume, window=3)
+
+    assert result.iloc[-1] == pytest.approx(19.80392156862745, rel=1e-9)
+
+
+def test_vwap_is_nan_when_window_volume_is_zero() -> None:
+    idx = pd.date_range("2021-01-01", periods=5, freq="D")
+    close = pd.Series(100.0, index=idx)
+    volume = pd.Series(0.0, index=idx)
+
+    result = vwap(close, close, close, volume, window=3)
+    assert result.dropna().empty
+
+
+# --------------------------------------------------------------------------
+# OBV
+# --------------------------------------------------------------------------
+
+
+def test_obv_accumulates_signed_volume() -> None:
+    idx = pd.date_range("2021-01-01", periods=5, freq="D")
+    close = pd.Series([100.0, 101.0, 99.0, 99.0, 105.0], index=idx)  # sube, baja, plano, sube
+    volume = pd.Series([10.0, 20.0, 30.0, 40.0, 50.0], index=idx)
+
+    result = obv(close, volume)
+
+    expected = pd.Series(
+        [10.0, 10.0 + 20.0, 30.0 - 30.0, 0.0, 0.0 + 50.0], index=idx
+    )
+    pd.testing.assert_series_equal(result, expected, check_names=False)
+
+
+def test_obv_first_value_is_first_volume() -> None:
+    idx = pd.date_range("2021-01-01", periods=4, freq="D")
+    close = pd.Series([50.0, 51.0, 52.0, 53.0], index=idx)
+    volume = pd.Series([5.0, 6.0, 7.0, 8.0], index=idx)
+
+    result = obv(close, volume)
+    assert result.iloc[0] == pytest.approx(5.0)
+
+
+# --------------------------------------------------------------------------
 # add_all_indicators
 # --------------------------------------------------------------------------
 
@@ -155,7 +223,7 @@ def test_add_all_indicators_returns_copy_with_expected_columns() -> None:
         "sma_20", "sma_50", "ema_12", "ema_26", "rsi_14",
         "macd", "macd_signal", "macd_hist",
         "bb_mid", "bb_upper", "bb_lower", "bb_pct_b", "bb_bandwidth", "bb_zscore",
-        "atr_14",
+        "atr_14", "vwap", "obv",
     }
     assert expected_new_cols.issubset(set(out.columns))
     assert set(df.columns).issubset(set(out.columns))

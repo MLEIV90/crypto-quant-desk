@@ -45,6 +45,13 @@ export const COLORS = {
   stochD: "#f59e0b",
   equityStrategy: "#38bdf8",
   equityBuyHold: "#f59e0b",
+  vwap: "#2dd4bf",
+  obv: "#2dd4bf",
+  ichimokuTenkan: "#f97316",
+  ichimokuKijun: "#3b82f6",
+  ichimokuSenkouA: "#22c55e",
+  ichimokuSenkouB: "#ef4444",
+  ichimokuChikou: "#94a3b8",
 } as const;
 
 export type ColorKey = keyof typeof COLORS;
