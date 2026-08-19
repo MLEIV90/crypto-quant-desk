@@ -19,6 +19,7 @@ import type {
   PredictionResponse,
   RefreshResponse,
   RiskResponse,
+  StatsResponse,
   StudiesResponse,
   SuggesterResponse,
 } from "./types";
@@ -137,4 +138,14 @@ export function getDataStatus(asset: string, interval: string): Promise<DataStat
  */
 export function postRefresh(asset: string, interval: string): Promise<RefreshResponse> {
   return apiPost<RefreshResponse>("/api/refresh", { asset, interval });
+}
+
+/**
+ * Estacionalidad, autocorrelación, ciclos (periodograma) y estacionariedad
+ * (ADF) — ver `api/main.py::get_stats` (Fase 11). Liviano (sin ajuste de
+ * modelos), pero recalcula estadística sobre TODO el histórico disponible
+ * cada vez, no solo el rango visible del gráfico.
+ */
+export function getStats(asset: string, interval: string): Promise<StatsResponse> {
+  return apiGet<StatsResponse>("/api/stats", { asset, interval });
 }

@@ -136,6 +136,53 @@ export interface RefreshResponse {
   ya_actualizado: boolean;
 }
 
+export interface SeasonalityBucket {
+  bucket: number;
+  retorno_medio: number;
+  mediana: number | null;
+  desvio: number | null;
+  n: number;
+}
+
+export interface AutocorrelationPoint {
+  lag: number;
+  acf_retornos: number | null;
+  acf_retornos2: number | null;
+}
+
+export interface PeriodogramTopPeriod {
+  periodo_dias: number;
+  potencia: number;
+}
+
+export interface PeriodogramResponse {
+  frecuencias: number[];
+  potencia: (number | null)[];
+  top_periodos: PeriodogramTopPeriod[];
+}
+
+export interface AdfResult {
+  estadistico: number;
+  p_valor: number;
+  n_lags: number;
+  n_obs: number;
+  valores_criticos: Record<string, number>;
+  es_estacionaria: boolean;
+}
+
+export interface StatsResponse {
+  asset: string;
+  interval: string;
+  estacionalidad_mensual: SeasonalityBucket[];
+  estacionalidad_semanal: SeasonalityBucket[];
+  estacionalidad_horaria: SeasonalityBucket[] | null;
+  autocorrelacion: AutocorrelationPoint[];
+  periodograma: PeriodogramResponse;
+  adf_precio: AdfResult;
+  adf_retornos: AdfResult;
+  halvings_btc: string[] | null;
+}
+
 export interface PredictionResponse {
   asset: string;
   used_onchain: boolean;

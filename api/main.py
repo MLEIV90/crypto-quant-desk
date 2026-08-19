@@ -15,10 +15,10 @@ de 15-30 segundos — un frontend NUNCA debería dispararlo automáticamente
 al cargar una vista, solo ante una acción explícita del usuario (un botón
 "correr predicción"). `/api/backtest` corre un backtest vectorizado
 completo (rápido). El resto (`/api/assets`, `/api/ohlcv`, `/api/studies`,
-`/api/suggester`, `/api/data-status`) son livianos (indicadores
-vectorizados, sin ajuste de modelos). Ninguno cachea entre requests — cada
-llamada recalcula desde cero (simple y correcto; una capa de caché queda
-para una fase futura si hiciera falta).
+`/api/suggester`, `/api/data-status`, `/api/stats`) son livianos
+(indicadores/estadística vectorizados, sin ajuste de modelos). Ninguno
+cachea entre requests — cada llamada recalcula desde cero (simple y
+correcto; una capa de caché queda para una fase futura si hiciera falta).
 
 RED — `/api/refresh` (Fase 9a) es el ÚNICO endpoint de toda la API que
 toca la red (Binance): todos los demás solo leen `data/snapshot/*.parquet`
@@ -39,17 +39,31 @@ import pandas as pd
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from analysis.statistics import (
+    BTC_HALVING_DATES,
+    autocorrelation,
+    hourly_seasonality,
+    monthly_seasonality,
+    spectral_periodogram,
+    weekday_seasonality,
+)
 from api.models import (
+    AdfResult,
     AssetsResponse,
+    AutocorrelationPoint,
     BacktestResponse,
     Candle,
     DataStatusResponse,
     EquityPoint,
     GarchSeriesResponse,
     OHLCVResponse,
+    PeriodogramResponse,
+    PeriodogramTopPeriod,
     PredictionResponse,
     RefreshResponse,
     RiskResponse,
+    SeasonalityBucket,
+    StatsResponse,
     StudiesResponse,
     SuggesterResponse,
 )
@@ -57,6 +71,7 @@ from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
 from config import UNIVERSE
 from data.loaders import get_prices
 from data.snapshot import GeoblockedError, last_closed_candle_open_time, update_snapshot
+from eda.eda_report import adf_test
 from metrics.risk_measures import expected_shortfall, value_at_risk
 from ml.features import align_features_labels, build_feature_matrix
 from ml.labeling import get_daily_volatility, triple_barrier_labels
@@ -76,6 +91,12 @@ logger = logging.getLogger(__name__)
 # vivo es `POST /api/refresh` (Fase 9a, ver data.snapshot.update_snapshot).
 SUPPORTED_INTERVALS: tuple[str, ...] = ("1d", "1h")
 DEFAULT_RISK_INTERVAL = "1d"  # el modelo GARCH del proyecto es diario, ver models/garch.py
+
+# Tope de `limit` en /api/ohlcv y /api/studies (Fase 11): por encima del
+# histórico horario real más largo (~58.000 velas desde 2020, ver
+# scripts/export_snapshot.py::DEFAULT_START_BY_INTERVAL), para que "Todo"
+# pueda pedir el histórico COMPLETO sin que el tope lo recorte primero.
+MAX_CANDLE_LIMIT: int = 60_000
 
 # Activos con cobertura on-chain suficiente para el modelo enriquecido de
 # /api/prediction (mismo criterio que `app.workers.ONCHAIN_ENABLED_ASSETS`
@@ -181,6 +202,26 @@ def _dates_to_list(index: pd.DatetimeIndex) -> list:
     return list(index.to_pydatetime())
 
 
+def _seasonality_to_buckets(df: pd.DataFrame, *, has_median_std: bool) -> list[SeasonalityBucket]:
+    """Convierte el DataFrame de `analysis.statistics.monthly_seasonality`/
+    `weekday_seasonality`/`hourly_seasonality` a `list[SeasonalityBucket]`
+    (Fase 11) — `has_median_std` distingue `monthly_seasonality` (trae
+    "mediana"/"desvio") de las otras dos (no las calculan).
+    """
+    buckets = []
+    for bucket, row in df.iterrows():
+        buckets.append(
+            SeasonalityBucket(
+                bucket=int(bucket),
+                retorno_medio=float(row["retorno_medio"]),
+                mediana=_none_if_nan(row["mediana"]) if has_median_std else None,
+                desvio=_none_if_nan(row["desvio"]) if has_median_std else None,
+                n=int(row["n"]),
+            )
+        )
+    return buckets
+
+
 def _humanize_age(delta: pd.Timedelta) -> str:
     """Antigüedad legible en español, para /api/data-status ("hace 5 días", "hace 3 h")."""
     seconds = delta.total_seconds()
@@ -216,11 +257,18 @@ def get_assets() -> AssetsResponse:
 def get_ohlcv(
     asset: str,
     interval: str = "1d",
-    limit: int = Query(500, gt=0, le=5000, description="Cantidad de velas más recientes a devolver"),
+    limit: int = Query(
+        500, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de velas más recientes a devolver"
+    ),
 ) -> OHLCVResponse:
     """Reutiliza `data.loaders.get_prices` tal cual; solo recorta a las
-    últimas `limit` velas (para no mandar, p. ej., las ~58.000 velas
-    horarias completas de un golpe, ver Fase 6b) y serializa a JSON.
+    últimas `limit` velas y serializa a JSON.
+
+    `le=MAX_CANDLE_LIMIT` (Fase 11): antes tope en 5000 rechazaba el pedido
+    de "Todo" el histórico horario (~58.000 velas) — ahora el tope alcanza
+    para pedir la historia COMPLETA de cualquier activo/intervalo (el
+    frontend, `PeriodSelector.tsx`, ya no necesita acotar "Todo" a un
+    número arbitrario menor al histórico real).
     """
     df = _load_df(asset, interval)
     recent = df.tail(limit)
@@ -248,7 +296,9 @@ def get_ohlcv(
 def get_studies(
     asset: str,
     interval: str = "1d",
-    limit: int = Query(500, gt=0, le=5000, description="Cantidad de velas más recientes a devolver"),
+    limit: int = Query(
+        500, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de velas más recientes a devolver"
+    ),
 ) -> StudiesResponse:
     """Reutiliza `signals.indicators.add_all_indicators` (incluye vwap/obv,
     Fase 10b), `signals.studies.stochastic`, `signals.studies.ichimoku`
@@ -576,6 +626,75 @@ def refresh_snapshot(asset: str, interval: str = "1d") -> RefreshResponse:
         filas_agregadas=result["filas_agregadas"],
         ultima_fecha=result["ultima_fecha"].to_pydatetime(),
         ya_actualizado=result["ya_actualizado"],
+    )
+
+
+# --------------------------------------------------------------------------
+# GET /api/stats
+# --------------------------------------------------------------------------
+
+
+@router.get(
+    "/stats",
+    response_model=StatsResponse,
+    summary="Análisis estadístico: estacionalidad, autocorrelación, ciclos y estacionariedad",
+)
+def get_stats(asset: str, interval: str = "1d") -> StatsResponse:
+    """Reutiliza `analysis.statistics` (Fase 11, estacionalidad/ACF/
+    periodograma) y `eda.eda_report.adf_test` (Fase 1, estacionariedad) tal
+    cual — ningún cálculo estadístico nuevo vive acá, solo se arma la
+    respuesta. NADA de esto predice el precio (ver el docstring de
+    `analysis/statistics.py`).
+
+    `estacionalidad_horaria` solo se calcula si `interval == "1h"` (con
+    velas diarias todas caerían en la hora 0, sin información — ver
+    `analysis.statistics.hourly_seasonality`). `halvings_btc` solo se
+    incluye si `asset == "BTC"`.
+    """
+    df = _load_df(asset, interval)
+    close = df["close"]
+    returns = simple_returns(close).dropna()
+
+    monthly = _seasonality_to_buckets(monthly_seasonality(returns), has_median_std=True)
+    weekly = _seasonality_to_buckets(weekday_seasonality(returns), has_median_std=False)
+    hourly = (
+        _seasonality_to_buckets(hourly_seasonality(returns), has_median_std=False)
+        if interval == "1h"
+        else None
+    )
+
+    periods_per_day = 24.0 if interval == "1h" else 1.0
+    acf_df = autocorrelation(returns)
+    autocorrelacion = [
+        AutocorrelationPoint(
+            lag=int(lag),
+            acf_retornos=_none_if_nan(row["acf_retornos"]),
+            acf_retornos2=_none_if_nan(row["acf_retornos2"]),
+        )
+        for lag, row in acf_df.iterrows()
+    ]
+
+    periodogram = spectral_periodogram(returns, periods_per_day=periods_per_day)
+    periodograma = PeriodogramResponse(
+        frecuencias=[float(f) for f in periodogram["frecuencias"]],
+        potencia=[_none_if_nan(p) for p in periodogram["potencia"]],
+        top_periodos=[
+            PeriodogramTopPeriod(periodo_dias=periodo, potencia=potencia)
+            for periodo, potencia in periodogram["top_periodos_dias"]
+        ],
+    )
+
+    return StatsResponse(
+        asset=asset,
+        interval=interval,
+        estacionalidad_mensual=monthly,
+        estacionalidad_semanal=weekly,
+        estacionalidad_horaria=hourly,
+        autocorrelacion=autocorrelacion,
+        periodograma=periodograma,
+        adf_precio=AdfResult(**adf_test(close)),
+        adf_retornos=AdfResult(**adf_test(returns)),
+        halvings_btc=list(BTC_HALVING_DATES) if asset == "BTC" else None,
     )
 
 

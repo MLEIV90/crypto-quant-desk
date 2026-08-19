@@ -96,3 +96,59 @@ export const BACKTEST_METRIC_HELP: Record<string, string> = {
   n_trades: "Cantidad de operaciones (cambios de posición) que ejecutó la estrategia durante el período.",
   turnover_total: "Cuánto 'movimiento' de posición hubo en total — más turnover implica más costos de transacción reales.",
 };
+
+export const PERIOD_SELECTOR_HELP =
+  "Elegí cuánta historia mostrar. 'Todo' trae el histórico completo — en velas horarias eso son unas 58.000 " +
+  "velas y puede tardar 1-2 segundos en cargar. Es esperado, no un error.";
+
+// --------------------------------------------------------------------------
+// Vista "Estadística" (Fase 11) — /api/stats. Mismo criterio de honestidad
+// que el resto: nada de esto predice el precio, se explicita en cada bloque.
+// --------------------------------------------------------------------------
+
+export const STATS_INTRO_HELP =
+  "Estos análisis describen patrones HISTÓRICOS del activo (estacionalidad, autocorrelación, ciclos) — " +
+  "ninguno predice el precio de mañana. En cripto, con pocos años de historia disponible, tratalos como " +
+  "observaciones curiosas para tu propio criterio, no como reglas para operar.";
+
+export const SEASONALITY_HELP = {
+  monthly:
+    "Retorno promedio histórico agrupando todas las velas por MES calendario, sin importar el año. Con pocos " +
+    "años de historia, cada mes tiene pocas observaciones independientes — un patrón acá es sugestivo, no una " +
+    "regla. Verde = promedio positivo, rojo = negativo.",
+  weekday:
+    "Retorno promedio histórico agrupando por día de la semana. A diferencia de las acciones, cripto opera " +
+    "los 7 días — no hay 'efecto fin de semana' por falta de mercado abierto. Igual que la estacionalidad " +
+    "mensual: patrón débil e inestable, no una regla operable.",
+};
+
+export const STATIONARITY_HELP =
+  "El test ADF (Augmented Dickey-Fuller) pregunta si una serie 'vuelve' hacia un nivel estable con el tiempo " +
+  "(estacionaria) o si puede alejarse sin límite (no estacionaria, como un 'paseo aleatorio'). El PRECIO de " +
+  "un activo cripto típicamente NO es estacionario (tiene tendencia de largo plazo) — por eso este proyecto " +
+  "modela sobre RETORNOS, que sí suelen ser estacionarios (oscilan alrededor de una media estable). p-valor < " +
+  "0.05 se lee como 'sí es estacionaria'.";
+
+export const AUTOCORRELATION_HELP = {
+  returns:
+    "Autocorrelación del NIVEL de retorno, rezago a rezago: ¿el retorno de hace N velas ayuda a predecir el " +
+    "de hoy? En un mercado razonablemente eficiente, estas barras deberían estar cerca de 0 — eso es lo " +
+    "ESPERADO, no una falla del análisis.",
+  squared:
+    "Autocorrelación de los retornos AL CUADRADO: mide si a un día volátil le sigue otro día volátil (aunque " +
+    "el SIGNO del retorno no se pueda predecir). Positiva y persistente en los primeros rezagos es lo típico " +
+    "en cripto — 'clustering de volatilidad', la motivación de modelar con GARCH (ver la vista Riesgo).",
+};
+
+export const CYCLES_HELP =
+  "El periodograma busca ciclos periódicos en los retornos. Un pico fuerte y aislado SERÍA evidencia de un " +
+  "ciclo; la AUSENCIA de un pico claro es el resultado típico en series financieras — los retornos se parecen " +
+  "mucho a ruido. Los 'períodos dominantes' de acá abajo son los picos más altos del periodograma, no " +
+  "necesariamente ciclos reales operables — antes de confiar en uno, sospechá primero de coincidencias de " +
+  "calendario o ruido de muestra chica.";
+
+export const HALVING_HELP =
+  "El halving reduce a la mitad la recompensa por bloque de Bitcoin cada ~4 años (hecho conocido, no un " +
+  "ajuste estadístico). La narrativa de un 'ciclo de 4 años' post-halving es popular, pero con apenas 4 " +
+  "halvings ocurridos hasta ahora es una muestra de n=4 — insuficiente para confirmar un patrón estadístico, " +
+  "por más que la narrativa sea conocida.";

@@ -76,6 +76,18 @@ def test_get_ohlcv_respects_limit_and_is_sorted_ascending() -> None:
     assert isinstance(primera["close"], float)
 
 
+def test_get_ohlcv_accepts_high_limit_for_full_history() -> None:
+    # Fase 11: "Todo" ya no debe rebotar con 422 al pedir el histórico
+    # horario completo (~58.000 velas) — antes el tope era le=5000.
+    response = client.get("/api/ohlcv", params={"asset": "BTC", "interval": "1h", "limit": 60_000})
+
+    assert response.status_code == 200
+    body = response.json()
+    # .tail(60_000) sobre un histórico más chico devuelve TODO lo disponible,
+    # no rellena con datos inventados — por eso no se compara contra 60_000.
+    assert len(body["velas"]) > 5_000
+
+
 def test_get_ohlcv_unknown_asset_returns_404() -> None:
     response = client.get("/api/ohlcv", params={"asset": "DOGE"})
 
@@ -419,6 +431,75 @@ def test_post_refresh_invalid_interval_returns_400() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/stats (Fase 11)
+# --------------------------------------------------------------------------
+
+
+def test_get_stats_daily_returns_expected_structure() -> None:
+    response = client.get("/api/stats", params={"asset": "BTC", "interval": "1d"})
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["asset"] == "BTC"
+    assert body["interval"] == "1d"
+    assert len(body["estacionalidad_mensual"]) > 0
+    assert set(body["estacionalidad_mensual"][0].keys()) == {"bucket", "retorno_medio", "mediana", "desvio", "n"}
+    assert len(body["estacionalidad_semanal"]) > 0
+    # diario: sin estacionalidad horaria (todas las velas caerían en la hora 0).
+    assert body["estacionalidad_horaria"] is None
+
+    assert len(body["autocorrelacion"]) > 0
+    assert body["autocorrelacion"][0]["lag"] == 0
+    assert body["autocorrelacion"][0]["acf_retornos"] == pytest.approx(1.0)
+
+    assert "top_periodos" in body["periodograma"]
+    assert len(body["periodograma"]["frecuencias"]) == len(body["periodograma"]["potencia"])
+
+    for adf_key in ("adf_precio", "adf_retornos"):
+        assert set(body[adf_key].keys()) == {
+            "estadistico", "p_valor", "n_lags", "n_obs", "valores_criticos", "es_estacionaria",
+        }
+    # el precio de BTC (con años de tendencia) típicamente NO es estacionario;
+    # los retornos sí — el hallazgo motivador de modelar sobre retornos.
+    assert body["adf_precio"]["es_estacionaria"] is False
+    assert body["adf_retornos"]["es_estacionaria"] is True
+
+    # BTC: fechas de halving incluidas.
+    assert body["halvings_btc"] == ["2012-11-28", "2016-07-09", "2020-05-11", "2024-04-20"]
+
+
+def test_get_stats_hourly_includes_hourly_seasonality() -> None:
+    response = client.get("/api/stats", params={"asset": "BTC", "interval": "1h"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["estacionalidad_horaria"] is not None
+    assert len(body["estacionalidad_horaria"]) > 0
+    horas = {bucket["bucket"] for bucket in body["estacionalidad_horaria"]}
+    assert horas.issubset(set(range(24)))
+
+
+def test_get_stats_non_btc_asset_has_no_halvings() -> None:
+    response = client.get("/api/stats", params={"asset": "ETH", "interval": "1d"})
+
+    assert response.status_code == 200
+    assert response.json()["halvings_btc"] is None
+
+
+def test_get_stats_unknown_asset_returns_404() -> None:
+    response = client.get("/api/stats", params={"asset": "DOGE"})
+
+    assert response.status_code == 404
+
+
+def test_get_stats_invalid_interval_returns_400() -> None:
+    response = client.get("/api/stats", params={"asset": "BTC", "interval": "5m"})
+
+    assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------
 # Documentación automática (Swagger/OpenAPI)
 # --------------------------------------------------------------------------
 
@@ -433,5 +514,5 @@ def test_docs_and_openapi_schema_are_available() -> None:
     assert set(paths.keys()) == {
         "/api/assets", "/api/ohlcv", "/api/studies", "/api/suggester",
         "/api/risk", "/api/backtest", "/api/garch-series", "/api/prediction",
-        "/api/data-status", "/api/refresh",
+        "/api/data-status", "/api/refresh", "/api/stats",
     }

@@ -319,7 +319,13 @@ export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, chart
       layout: { background: { type: ColorType.Solid, color: COLORS.background }, textColor: COLORS.textMuted },
       grid: { vertLines: { color: COLORS.border }, horzLines: { color: COLORS.border } },
       crosshair: { mode: CrosshairMode.Normal },
-      timeScale: { borderColor: COLORS.border, timeVisible: true, secondsVisible: false },
+      // minBarSpacing bien por debajo del default (0.5px, Fase 11): con
+      // "Todo" en horario (~58.000 velas) en un contenedor de ~1000px, el
+      // espaciado que necesita `fitContent()` para mostrarlas TODAS es
+      // <0.02px/vela — con el default, el tope de espaciado mínimo le
+      // ganaba a "mostrar todo" y el gráfico quedaba recortado a un tramo
+      // reciente en vez de la historia completa.
+      timeScale: { borderColor: COLORS.border, timeVisible: true, secondsVisible: false, minBarSpacing: 0.02 },
       rightPriceScale: { borderColor: COLORS.border },
       autoSize: true,
     });
@@ -382,9 +388,22 @@ export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, chart
     activeOverlays.forEach((key) => {
       overlayArtifactsRef.current.set(key, createOverlay(chart, candleSeries, key, studies));
     });
+    // `fitContent()` también acá (no solo en el efecto de velas de arriba):
+    // `/api/studies` tarda más que `/api/ohlcv` (calcula bastante más sobre
+    // el mismo rango), así que hay una ventana donde las velas YA tienen el
+    // dataset nuevo pero los overlays (SMA/EMA/etc.) todavía muestran el
+    // viejo — si `fitContent()` corre en esa ventana, "fitea" contra una
+    // mezcla de rangos inconsistente entre series y termina mostrando un
+    // recorte parcial en vez de la historia completa (reproducible con
+    // "Todo" tras venir de un período mucho más corto). Repetir el fit acá,
+    // ya con los overlays al día, corrige ese caso sin tener que
+    // sincronizar a mano cuándo termina cada query.
+    chart.timeScale().fitContent();
   }, [activeOverlays, studies]);
 
-  // Osciladores: mismo criterio (reconstrucción completa) que los overlays.
+  // Osciladores: mismo criterio (reconstrucción completa) que los overlays,
+  // mismo re-fit al final y por la misma razón (paneles propios, pero
+  // comparten el timeScale con las velas).
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -394,6 +413,7 @@ export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, chart
     activeOscillators.forEach((key) => {
       oscillatorArtifactsRef.current.set(key, createOscillator(chart, key, studies));
     });
+    chart.timeScale().fitContent();
   }, [activeOscillators, studies]);
 
   return <div ref={containerRef} className="chart-container" />;

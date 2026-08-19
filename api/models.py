@@ -209,3 +209,79 @@ class DataStatusResponse(BaseModel):
     desactualizado: bool = Field(
         description="True si la antigüedad supera el umbral esperado del intervalo (1 día para 1d, 2h para 1h)"
     )
+
+
+class SeasonalityBucket(BaseModel):
+    """Una fila de `analysis.statistics.monthly_seasonality`/`weekday_seasonality`/
+    `hourly_seasonality` (Fase 11) — `bucket` es el mes (1-12), día de semana
+    (0=lunes..6=domingo) u hora UTC (0-23) según el campo de `StatsResponse`
+    que la contiene. `mediana`/`desvio` son `None` en estacionalidad semanal
+    y horaria (esas funciones no las calculan, ver su docstring).
+    """
+
+    bucket: int
+    retorno_medio: float
+    mediana: float | None = None
+    desvio: float | None = None
+    n: int
+
+
+class AutocorrelationPoint(BaseModel):
+    """Un rezago de `analysis.statistics.autocorrelation` (Fase 11)."""
+
+    lag: int
+    acf_retornos: float | None = Field(description="ACF del NIVEL de retorno — cerca de 0 es lo esperado")
+    acf_retornos2: float | None = Field(
+        description="ACF de los retornos al cuadrado — positiva y persistente indica clustering de volatilidad"
+    )
+
+
+class PeriodogramTopPeriod(BaseModel):
+    """Un período dominante de `analysis.statistics.spectral_periodogram` (Fase 11)."""
+
+    periodo_dias: float
+    potencia: float
+
+
+class PeriodogramResponse(BaseModel):
+    """Periodograma completo de `analysis.statistics.spectral_periodogram` (Fase 11)."""
+
+    frecuencias: list[float] = Field(description="Frecuencias en ciclos/día")
+    potencia: list[float | None] = Field(description="Densidad espectral de potencia, mismo orden que 'frecuencias'")
+    top_periodos: list[PeriodogramTopPeriod] = Field(
+        description="Hasta 3 períodos dominantes en días, ordenados por potencia descendente"
+    )
+
+
+class AdfResult(BaseModel):
+    """Resultado de `eda.eda_report.adf_test` (test Augmented Dickey-Fuller de raíz unitaria), reutilizado tal cual."""
+
+    estadistico: float
+    p_valor: float
+    n_lags: int = Field(description="Rezagos elegidos automáticamente por criterio AIC")
+    n_obs: int
+    valores_criticos: dict[str, float] = Field(description="Valores críticos al 1%/5%/10%")
+    es_estacionaria: bool = Field(description="True si se rechaza H0 (raíz unitaria) al 5% de significancia")
+
+
+class StatsResponse(BaseModel):
+    """Respuesta de `GET /api/stats` (Fase 11) — estacionalidad, autocorrelación,
+    ciclos (periodograma) y estacionariedad (ADF). NADA de esto predice el
+    precio — ver el docstring de `analysis/statistics.py` y los tooltips
+    del frontend (`helpTexts.ts`) para el porqué de cada honestidad.
+    """
+
+    asset: str
+    interval: str
+    estacionalidad_mensual: list[SeasonalityBucket]
+    estacionalidad_semanal: list[SeasonalityBucket]
+    estacionalidad_horaria: list[SeasonalityBucket] | None = Field(
+        default=None, description="Solo presente si interval='1h' — con velas diarias, todas caerían en la hora 0"
+    )
+    autocorrelacion: list[AutocorrelationPoint]
+    periodograma: PeriodogramResponse
+    adf_precio: AdfResult = Field(description="ADF sobre el NIVEL de precio — típicamente NO estacionario")
+    adf_retornos: AdfResult = Field(description="ADF sobre los RETORNOS — típicamente SÍ estacionarios")
+    halvings_btc: list[str] | None = Field(
+        default=None, description="Fechas de halving de Bitcoin (ISO), solo presente si asset='BTC'"
+    )

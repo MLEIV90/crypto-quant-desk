@@ -18,6 +18,7 @@ import { TechnicalAnalysisView } from "./views/TechnicalAnalysisView";
 import { RiskView } from "./views/RiskView";
 import { BacktestView } from "./views/BacktestView";
 import { ResearchView } from "./views/ResearchView";
+import { StatisticsView } from "./views/StatisticsView";
 
 const DEFAULT_ASSET = "BTC";
 const DEFAULT_INTERVAL = "1d";
@@ -40,9 +41,12 @@ function Dashboard() {
 
   // Riesgo/Backtest/Research siempre operan en diario (DEFAULT_RISK_INTERVAL
   // en api/main.py) — el selector de timeframe ni se muestra ahí (ver
-  // AssetSelector.showTimeframe), así que el estado de datos que corresponde
-  // mostrar en esas vistas es siempre el de "1d", no el de `interval`.
-  const dataStatusInterval = activeView === "tecnico" ? interval : "1d";
+  // AssetSelector.showTimeframe). Estadística (Fase 11) SÍ soporta horario
+  // (estacionalidad_horaria solo existe con interval="1h", ver
+  // api/main.py::get_stats), así que ahí el selector queda visible igual
+  // que en Análisis Técnico.
+  const showTimeframeSelector = activeView === "tecnico" || activeView === "estadistica";
+  const dataStatusInterval = showTimeframeSelector ? interval : "1d";
 
   return (
     <div className="app">
@@ -56,7 +60,7 @@ function Dashboard() {
           timeframe={interval}
           onAssetChange={setAsset}
           onTimeframeChange={setInterval}
-          showTimeframe={activeView === "tecnico"}
+          showTimeframe={showTimeframeSelector}
         />
       </header>
 
@@ -70,6 +74,7 @@ function Dashboard() {
       {activeView === "riesgo" && <RiskView asset={asset} />}
       {activeView === "backtest" && <BacktestView asset={asset} />}
       {activeView === "research" && <ResearchView asset={asset} />}
+      {activeView === "estadistica" && <StatisticsView asset={asset} interval={interval} />}
     </div>
   );
 }

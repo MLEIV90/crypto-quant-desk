@@ -13,6 +13,9 @@
  * osciladores (RSI/MACD/Estocástico) — ver `views/TechnicalAnalysisView.tsx`.
  */
 
+import { InfoTooltip } from "./InfoTooltip";
+import { PERIOD_SELECTOR_HELP } from "../helpTexts";
+
 export type PeriodKey = "1W" | "1M" | "3M" | "6M" | "1A" | "3A" | "todo";
 
 export const DEFAULT_PERIOD: PeriodKey = "3M";
@@ -27,10 +30,18 @@ const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
   { key: "todo", label: "Todo" },
 ];
 
-// Velas por período, por intervalo. "1W"/"todo" usan los números pedidos
-// explícitamente (7/168 y 3000/57000, cubriendo desde 2018 en diario y
-// desde 2020 en horario — ver scripts/export_snapshot.py::DEFAULT_START_BY_INTERVAL).
-// El resto sigue la misma aproximación calendario (días * 24 = horas).
+// `/api/ohlcv`/`/api/studies` acotan `limit` a MAX_CANDLE_LIMIT=60_000
+// (api/main.py, Fase 11) — bien por encima del histórico real más largo
+// (~58.000 velas horarias desde 2020, ~3.150 diarias desde 2018).
+const MAX_API_LIMIT = 60_000;
+
+// Velas por período, por intervalo. El resto de los períodos sigue una
+// aproximación calendario (días * 24 = horas). "todo" (Fase 11, fix del
+// rango "Todo"): en vez de un número inventado que podía quedarse corto
+// contra el histórico real, pide directamente el tope que acepta el
+// backend — como el backend recorta con `.tail(limit)`, pedir MÁS de lo
+// que existe simplemente devuelve TODO lo disponible, sin inventar una
+// cantidad "mágica" por activo/intervalo que haya que mantener a mano.
 const CANDLES_PER_PERIOD: Record<PeriodKey, { "1d": number; "1h": number }> = {
   "1W": { "1d": 7, "1h": 168 },
   "1M": { "1d": 30, "1h": 720 },
@@ -38,14 +49,8 @@ const CANDLES_PER_PERIOD: Record<PeriodKey, { "1d": number; "1h": number }> = {
   "6M": { "1d": 180, "1h": 4320 },
   "1A": { "1d": 365, "1h": 8760 },
   "3A": { "1d": 1095, "1h": 26280 },
-  todo: { "1d": 3000, "1h": 57000 },
+  todo: { "1d": MAX_API_LIMIT, "1h": MAX_API_LIMIT },
 };
-
-// `/api/ohlcv` y `/api/studies` acotan `limit` a 5000 (`le=5000` en
-// `api/main.py`, backend intacto en esta fase) — "Todo" en horario pediría
-// 57000, que la API rechazaría con 422. Se acota acá al máximo real que el
-// backend acepta, en vez de dejar que el botón "Todo" falle en horario.
-const MAX_API_LIMIT = 5000;
 
 export function candleLimitForPeriod(period: PeriodKey, interval: string): number {
   const table = CANDLES_PER_PERIOD[period];
@@ -71,6 +76,7 @@ export function PeriodSelector({ active, onChange }: PeriodSelectorProps) {
           {label}
         </button>
       ))}
+      <InfoTooltip text={PERIOD_SELECTOR_HELP} placement="bottom" />
     </div>
   );
 }
