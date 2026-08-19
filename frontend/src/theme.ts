@@ -52,6 +52,8 @@ export const COLORS = {
   ichimokuSenkouA: "#22c55e",
   ichimokuSenkouB: "#ef4444",
   ichimokuChikou: "#94a3b8",
+  volumeProfileBar: "#38bdf8",
+  volumeProfilePoc: "#ec4899",
 } as const;
 
 export type ColorKey = keyof typeof COLORS;

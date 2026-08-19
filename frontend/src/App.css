@@ -576,6 +576,25 @@
   box-shadow: var(--shadow-panel);
 }
 
+/* Volume Profile (Fase 13a): el canvas de las barras se superpone al
+   chart-container, ver components/Chart.tsx::drawVolumeProfile. */
+.chart-container-wrapper {
+  position: relative;
+}
+
+.volume-profile-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  /* z-index explícito (Fase 13a): lightweight-charts pone su propio
+     contenedor (`.chart-container`, el div que recibe `createChart`) en
+     `position: relative` internamente para posicionar SUS canvases —
+     sin un z-index positivo acá, este canvas (z-index:auto) puede
+     terminar pintado DEBAJO de esos, aunque venga después en el DOM. */
+  z-index: 5;
+}
+
 /* ---------------------------------------------------------------------
    Herramientas de dibujo sobre el gráfico (Fase 8d)
    --------------------------------------------------------------------- */

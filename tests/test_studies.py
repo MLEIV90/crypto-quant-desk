@@ -15,6 +15,7 @@ from signals.studies import (
     stochastic,
     support_resistance,
     swing_points,
+    volume_profile,
 )
 
 
@@ -255,3 +256,130 @@ def test_all_studies_returns_expected_structure() -> None:
     # chikou en la última vela es siempre None por construcción (usa close
     # futuro, ver ichimoku()) — no es un bug, está documentado.
     assert summary["ichimoku"]["chikou"] is None
+
+
+# --------------------------------------------------------------------------
+# volume_profile (Fase 13a)
+# --------------------------------------------------------------------------
+
+
+def _flat_ohlcv(prices: list[float], volumes: list[float], price_width: float = 0.5) -> pd.DataFrame:
+    """OHLCV sintético con rango de precio angosto por vela (`high =
+    price + width/2`, `low = price - width/2`) — cada vela reparte su
+    volumen casi enteramente en el nivel que contiene `price`, útil para
+    controlar a mano DÓNDE debería caer el volumen en `volume_profile`.
+    """
+    n = len(prices)
+    idx = pd.date_range("2021-01-01", periods=n, freq="D", tz="UTC")
+    prices_arr = np.array(prices, dtype=float)
+    return pd.DataFrame(
+        {
+            "open": prices_arr,
+            "close": prices_arr,
+            "high": prices_arr + price_width / 2.0,
+            "low": prices_arr - price_width / 2.0,
+            "volume": volumes,
+        },
+        index=idx,
+    )
+
+
+def test_volume_profile_poc_falls_where_volume_concentrated() -> None:
+    # 90 velas cerca de 100 con volumen chico, 10 velas cerca de 200 con
+    # volumen ENORME -> el POC debe caer cerca de 200, no de 100, aunque
+    # haya muchas más VELAS cerca de 100 (el POC es por VOLUMEN, no por
+    # cantidad de velas).
+    rng = np.random.default_rng(0)
+    low_prices = 100.0 + rng.normal(0, 0.3, 90)
+    high_prices = 200.0 + rng.normal(0, 0.3, 10)
+    prices = np.concatenate([low_prices, high_prices])
+    volumes = np.concatenate([np.full(90, 10.0), np.full(10, 5000.0)])
+    df = _flat_ohlcv(prices.tolist(), volumes.tolist())
+
+    profile = volume_profile(df, bins=50)
+
+    assert profile["poc"] == pytest.approx(200.0, abs=2.0)
+
+
+def test_volume_profile_conserves_total_volume() -> None:
+    # El volumen total repartido entre niveles no puede perderse ni
+    # inflarse respecto del volumen real de las velas.
+    df = _synthetic_ohlcv_oscillating(n=200, seed=1)
+    profile = volume_profile(df, bins=40)
+
+    assert sum(profile["volumenes"]) == pytest.approx(profile["volumen_total"])
+    assert profile["volumen_total"] == pytest.approx(df["volume"].sum())
+
+
+def test_volume_profile_value_area_covers_target_fraction() -> None:
+    df = _synthetic_ohlcv_oscillating(n=200, seed=2)
+    profile = volume_profile(df, bins=50, value_area_fraction=0.70)
+
+    niveles = np.array(profile["niveles_precio"])
+    volumenes = np.array(profile["volumenes"])
+    in_value_area = (niveles >= profile["value_area_low"]) & (niveles <= profile["value_area_high"])
+    coverage = volumenes[in_value_area].sum() / volumenes.sum()
+
+    assert coverage >= 0.70
+    # con la distribución sintética (oscilante, no uniforme), el 70% del
+    # volumen tiene que caber en MENOS niveles que el total, si no el value
+    # area no estaría concentrando nada.
+    assert in_value_area.sum() < len(niveles)
+
+
+def test_volume_profile_value_area_contains_poc() -> None:
+    df = _synthetic_ohlcv_oscillating(n=200, seed=3)
+    profile = volume_profile(df, bins=50)
+
+    assert profile["value_area_low"] <= profile["poc"] <= profile["value_area_high"]
+
+
+def test_volume_profile_returns_requested_bins_ascending() -> None:
+    df = _synthetic_ohlcv_oscillating(n=100, seed=5)
+    profile = volume_profile(df, bins=30)
+
+    assert len(profile["niveles_precio"]) == 30
+    assert len(profile["volumenes"]) == 30
+    assert profile["niveles_precio"] == sorted(profile["niveles_precio"])
+
+
+def test_volume_profile_handles_some_zero_range_candles() -> None:
+    # Mezcla velas con rango 0 (high==low) y velas con rango real: no debe
+    # perder volumen ni romper (ver la rama "degenerate" del cálculo).
+    df = pd.DataFrame(
+        {
+            "open": [100.0, 100.0, 150.0, 150.0, 200.0],
+            "close": [100.0, 100.0, 150.0, 150.0, 200.0],
+            "high": [100.0, 100.0, 160.0, 150.0, 210.0],
+            "low": [100.0, 100.0, 140.0, 150.0, 190.0],
+            "volume": [10.0, 20.0, 30.0, 40.0, 50.0],
+        },
+        index=pd.date_range("2021-01-01", periods=5, freq="D", tz="UTC"),
+    )
+
+    profile = volume_profile(df, bins=20)
+
+    assert sum(profile["volumenes"]) == pytest.approx(150.0)
+
+
+def test_volume_profile_degenerate_single_price_does_not_crash() -> None:
+    df = _flat_ohlcv([100.0] * 20, [10.0] * 20, price_width=0.0)
+
+    profile = volume_profile(df, bins=10)
+
+    assert profile["poc"] == pytest.approx(100.0)
+    assert profile["value_area_low"] == pytest.approx(100.0)
+    assert profile["value_area_high"] == pytest.approx(100.0)
+    assert profile["volumen_total"] == pytest.approx(200.0)
+
+
+def test_volume_profile_empty_df_raises() -> None:
+    df = _synthetic_ohlcv_oscillating(n=10, seed=0).iloc[0:0]
+    with pytest.raises(ValueError):
+        volume_profile(df)
+
+
+def test_volume_profile_invalid_bins_raises() -> None:
+    df = _synthetic_ohlcv_oscillating(n=10, seed=0)
+    with pytest.raises(ValueError):
+        volume_profile(df, bins=0)

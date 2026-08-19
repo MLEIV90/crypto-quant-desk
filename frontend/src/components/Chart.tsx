@@ -24,6 +24,18 @@
  * (`../heikinAshi.ts`, transformación puramente visual calculada en el
  * frontend) — solo cambia qué OHLC recibe la serie de velas; los overlays/
  * osciladores siguen usando el precio real de `/api/studies` siempre.
+ *
+ * `volumeProfile` (Fase 13a): a diferencia del resto de los overlays (que
+ * son series/price-lines nativas de lightweight-charts), el histograma
+ * HORIZONTAL de Volume Profile no tiene primitiva nativa en la versión
+ * gratuita de la librería — se dibuja con un `<canvas>` propio, superpuesto
+ * en `position: absolute` sobre el mismo contenedor del chart, usando
+ * `candleSeries.priceToCoordinate()` para ubicar cada nivel de precio en su
+ * píxel Y exacto (así queda perfectamente alineado con el eje de precio
+ * real, incluso al hacer zoom/paneo). El POC sí usa una price line NATIVA
+ * (`createPriceLine`, mismo mecanismo que Fibonacci/soporte-resistencia)
+ * para quedar resaltado con su propia etiqueta en el eje — solo las BARRAS
+ * del histograma y el sombreado del Value Area van al canvas.
  */
 
 import { useEffect, useRef } from "react";
@@ -38,7 +50,7 @@ import {
   LineStyle,
 } from "lightweight-charts";
 import type { IChartApi, IPaneApi, ISeriesApi, SeriesType, Time, UTCTimestamp } from "lightweight-charts";
-import type { OHLCVResponse, StudiesResponse } from "../types";
+import type { OHLCVResponse, StudiesResponse, VolumeProfileResponse } from "../types";
 import type { ChartTypeKey } from "./ChartTypeSelector";
 import type { OverlayKey } from "./StudyToggles";
 import type { OscillatorKey } from "./OscillatorPanel";
@@ -51,6 +63,7 @@ interface ChartProps {
   activeOverlays: Set<OverlayKey>;
   activeOscillators: Set<OscillatorKey>;
   chartType: ChartTypeKey;
+  volumeProfile?: VolumeProfileResponse | null;
   onChartReady?: (chart: IChartApi | null, candleSeries: ISeriesApi<"Candlestick", Time> | null) => void;
 }
 
@@ -303,12 +316,89 @@ function removeOscillator(chart: IChartApi, artifact: OscillatorArtifact): void 
   chart.removePane(artifact.pane.paneIndex());
 }
 
-export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, chartType, onChartReady }: ChartProps) {
+const VOLUME_PROFILE_MAX_BAR_PX = 160;
+const VOLUME_PROFILE_MAX_BAR_FRACTION = 0.35;
+const VOLUME_PROFILE_BAR_ALPHA = 0.45;
+const VOLUME_PROFILE_BAR_ALPHA_VALUE_AREA = 0.7;
+
+/** Dibuja las barras horizontales del Volume Profile en `canvas`, alineadas
+ * en Y con `candleSeries.priceToCoordinate()` — ver la nota de `ChartProps`
+ * más arriba sobre por qué esto es un canvas y no series nativas.
+ */
+function drawVolumeProfile(
+  canvas: HTMLCanvasElement,
+  container: HTMLElement,
+  chart: IChartApi,
+  candleSeries: ISeriesApi<"Candlestick", Time>,
+  profile: VolumeProfileResponse | null,
+): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  canvas.width = Math.max(1, width * dpr);
+  canvas.height = Math.max(1, height * dpr);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  if (!profile || profile.niveles_precio.length === 0) return;
+
+  const priceScaleWidth = chart.priceScale("right").width();
+  const plotWidth = Math.max(0, width - priceScaleWidth);
+  const maxBarWidth = Math.min(VOLUME_PROFILE_MAX_BAR_PX, plotWidth * VOLUME_PROFILE_MAX_BAR_FRACTION);
+  const maxVolume = Math.max(...profile.volumenes, 1e-9);
+  const pocVolume = Math.max(...profile.volumenes);
+
+  const n = profile.niveles_precio.length;
+  const firstY = candleSeries.priceToCoordinate(profile.niveles_precio[0]);
+  const secondY = n > 1 ? candleSeries.priceToCoordinate(profile.niveles_precio[1]) : null;
+  const binHeightPx =
+    firstY !== null && secondY !== null ? Math.max(2, Math.abs(secondY - firstY)) : 8;
+
+  // Panel de fondo detrás de las barras (más oscuro que el gráfico): sin
+  // esto, barras translúcidas contra el grid del chart quedan casi
+  // invisibles a simple vista pese a tener alpha > 0.
+  ctx.fillStyle = "rgba(15, 23, 42, 0.55)";
+  ctx.fillRect(plotWidth - maxBarWidth, 0, maxBarWidth, height);
+
+  for (let i = 0; i < n; i++) {
+    const price = profile.niveles_precio[i];
+    const vol = profile.volumenes[i];
+    const y = candleSeries.priceToCoordinate(price);
+    if (y === null || y < -binHeightPx || y > height + binHeightPx) continue;
+
+    const barWidth = (vol / maxVolume) * maxBarWidth;
+    const inValueArea = price >= profile.value_area_low && price <= profile.value_area_high;
+    const isPoc = vol === pocVolume;
+
+    ctx.fillStyle = isPoc
+      ? COLORS.volumeProfilePoc
+      : `rgba(56, 189, 248, ${inValueArea ? VOLUME_PROFILE_BAR_ALPHA_VALUE_AREA : VOLUME_PROFILE_BAR_ALPHA})`;
+    const barHeight = binHeightPx * 0.8;
+    ctx.fillRect(plotWidth - barWidth, y - barHeight / 2, barWidth, barHeight);
+  }
+}
+
+export function Chart({
+  ohlcv,
+  studies,
+  activeOverlays,
+  activeOscillators,
+  chartType,
+  volumeProfile = null,
+  onChartReady,
+}: ChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
   const overlayArtifactsRef = useRef<Map<OverlayKey, OverlayArtifact>>(new Map());
   const oscillatorArtifactsRef = useRef<Map<OscillatorKey, OscillatorArtifact>>(new Map());
+  const volumeProfileCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const volumeProfilePocLineRef = useRef<ReturnType<LineSeriesApi["createPriceLine"]> | null>(null);
 
   // El chart se crea UNA sola vez y se destruye al desmontar el componente.
   useEffect(() => {
@@ -386,6 +476,10 @@ export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, chart
     overlayArtifactsRef.current.forEach((artifact) => removeOverlay(chart, artifact));
     overlayArtifactsRef.current.clear();
     activeOverlays.forEach((key) => {
+      // "volumeProfile" no pasa por acá: no es una serie/price-line
+      // genérica, tiene su propio efecto de canvas más abajo (ver
+      // `drawVolumeProfile`).
+      if (key === "volumeProfile") return;
       overlayArtifactsRef.current.set(key, createOverlay(chart, candleSeries, key, studies));
     });
     // `fitContent()` también acá (no solo en el efecto de velas de arriba):
@@ -416,5 +510,54 @@ export function Chart({ ohlcv, studies, activeOverlays, activeOscillators, chart
     chart.timeScale().fitContent();
   }, [activeOscillators, studies]);
 
-  return <div ref={containerRef} className="chart-container" />;
+  // Volume Profile (Fase 13a): la línea del POC es una price line NATIVA
+  // (se crea/destruye una sola vez por cambio de datos, igual que
+  // Fibonacci/S-R más arriba); las BARRAS del histograma van al canvas
+  // propio (`drawVolumeProfile`), redibujado en cada pan/zoom
+  // (`subscribeVisibleLogicalRangeChange`, dispara cuando el autoscale de
+  // precio cambia) y en cada resize del contenedor (`ResizeObserver`) para
+  // que las barras no se desalineen del eje de precio real.
+  useEffect(() => {
+    const chart = chartRef.current;
+    const candleSeries = candleSeriesRef.current;
+    const canvas = volumeProfileCanvasRef.current;
+    const container = containerRef.current;
+    if (!chart || !candleSeries || !canvas || !container) return;
+
+    if (volumeProfilePocLineRef.current) {
+      candleSeries.removePriceLine(volumeProfilePocLineRef.current);
+      volumeProfilePocLineRef.current = null;
+    }
+
+    const showProfile = activeOverlays.has("volumeProfile") && volumeProfile !== null;
+    if (showProfile && volumeProfile) {
+      volumeProfilePocLineRef.current = candleSeries.createPriceLine({
+        price: volumeProfile.poc,
+        color: COLORS.volumeProfilePoc,
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: true,
+        title: "POC",
+      });
+    }
+
+    const redraw = () => drawVolumeProfile(canvas, container, chart, candleSeries, showProfile ? volumeProfile : null);
+    redraw();
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
+    const resizeObserver = new ResizeObserver(redraw);
+    resizeObserver.observe(container);
+
+    return () => {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(redraw);
+      resizeObserver.disconnect();
+    };
+  }, [activeOverlays, volumeProfile]);
+
+  return (
+    <div className="chart-container-wrapper">
+      <div ref={containerRef} className="chart-container" />
+      <canvas ref={volumeProfileCanvasRef} className="volume-profile-canvas" />
+    </div>
+  );
 }

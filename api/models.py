@@ -355,6 +355,25 @@ class PairDetailResponse(BaseModel):
     estabilidad_mensaje: str | None = Field(default=None, description="Explica por qué 'estabilidad' es null, si aplica")
 
 
+class VolumeProfileResponse(BaseModel):
+    """Respuesta de `GET /api/volume-profile` (Fase 13a) — reutiliza
+    `signals.studies.volume_profile` tal cual. Volume Profile: cuánto
+    volumen se operó en cada NIVEL DE PRECIO del período (no en el tiempo,
+    como el volumen normal). Herramienta de ANÁLISIS, no predice — ver el
+    tooltip del frontend (`helpTexts.ts`): los nodos de alto volumen SUELEN
+    actuar como soporte/resistencia, no es una regla garantizada.
+    """
+
+    asset: str
+    interval: str
+    niveles_precio: list[float] = Field(description="Precio (punto medio de cada nivel), ascendente")
+    volumenes: list[float] = Field(description="Volumen acumulado por nivel, mismo orden que niveles_precio")
+    poc: float = Field(description="Point of Control: el nivel de precio con más volumen del período")
+    value_area_low: float = Field(description="Límite inferior del Value Area (rango que concentra ~70% del volumen)")
+    value_area_high: float = Field(description="Límite superior del Value Area")
+    volumen_total: float = Field(description="Suma de 'volumenes' — para calcular % sobre el total en el frontend")
+
+
 class CompareResponse(BaseModel):
     """Respuesta de `GET /api/compare` (Fase 12a) — reutiliza
     `analysis.comparison.compare_assets` tal cual. Comparación de

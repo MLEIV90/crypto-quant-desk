@@ -60,6 +60,8 @@ DEFAULT_ADX_WINDOW: int = 14
 DEFAULT_ICHIMOKU_TENKAN: int = 9
 DEFAULT_ICHIMOKU_KIJUN: int = 26
 DEFAULT_ICHIMOKU_SENKOU_B: int = 52
+DEFAULT_VOLUME_PROFILE_BINS: int = 50
+DEFAULT_VALUE_AREA_FRACTION: float = 0.70
 
 
 def _format_ratio(ratio: float) -> str:
@@ -385,6 +387,124 @@ def ichimoku(
         {"tenkan": tenkan, "kijun": kijun, "senkou_a": senkou_a, "senkou_b": senkou_b, "chikou": chikou},
         index=close.index,
     )
+
+
+def volume_profile(
+    df: pd.DataFrame,
+    bins: int = DEFAULT_VOLUME_PROFILE_BINS,
+    value_area_fraction: float = DEFAULT_VALUE_AREA_FRACTION,
+) -> dict:
+    """Volume Profile (Fase 13a): cuánto volumen se operó en cada NIVEL DE
+    PRECIO del período — a diferencia del volumen "normal" (por vela/tiempo),
+    este es por precio.
+
+    HONESTIDAD: los niveles con mucho volumen ("nodos de alto volumen")
+    SUELEN actuar como soporte/resistencia porque mucha gente operó ahí y
+    puede reaccionar de nuevo al volver a ese precio — es una lectura
+    razonable de comportamiento de mercado, pero NO una garantía: el precio
+    puede atravesar un nodo de alto volumen sin reaccionar, igual que
+    cualquier otro nivel técnico de este proyecto (ver CONTEXTO HONESTO del
+    módulo).
+
+    CÁLCULO (vectorizado, sin loop por vela): se arma una grilla de `bins`
+    niveles de precio equiespaciados entre el mínimo `low` y el máximo
+    `high` de todo `df`. El volumen de CADA vela se reparte entre los
+    niveles que su rango `[low, high]` atraviesa, proporcional a cuánto de
+    ese rango cae en cada nivel (una vela que se movió mucho reparte su
+    volumen entre varios niveles; una vela sin rango, `high == low`, pone
+    todo su volumen en el nivel que contiene ese precio) — la convención
+    estándar de "volume profile" que reparte por el RANGO recorrido, no
+    solo por el cierre, sin necesitar datos tick-by-tick (que este proyecto
+    no tiene).
+
+    - "poc" (Point of Control): el nivel de precio con más volumen
+      acumulado — el precio "más negociado" del período.
+    - "value_area_low"/"value_area_high": el rango de precio más angosto
+      que concentra `value_area_fraction` (70% por defecto, el estándar de
+      la industria) del volumen total. Se arma expandiendo desde el nivel
+      del POC hacia el nivel vecino (arriba o abajo) con más volumen, un
+      nivel a la vez, hasta alcanzar esa fracción — el algoritmo clásico de
+      "value area" de market profile, en su versión simplificada de a un
+      nivel por paso (no de a pares).
+
+    Devuelve un dict:
+    - "niveles_precio": lista de `bins` precios (punto medio de cada nivel), ascendente.
+    - "volumenes": lista de `bins` volúmenes acumulados, mismo orden que "niveles_precio".
+    - "poc": float.
+    - "value_area_low"/"value_area_high": float.
+    - "volumen_total": float (suma de "volumenes", para que el consumidor pueda calcular %).
+
+    Lanza `ValueError` si `df` está vacío o `bins < 1`.
+    """
+    if df.empty:
+        raise ValueError("volume_profile: 'df' está vacío")
+    if bins < 1:
+        raise ValueError(f"volume_profile: 'bins' debe ser >= 1, recibido {bins}")
+
+    high = df["high"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+    volume = df["volume"].fillna(0.0).to_numpy(dtype=float)
+
+    price_min = float(low.min())
+    price_max = float(high.max())
+
+    if price_max <= price_min:
+        # Caso degenerado (todo el período operó a un único precio): no
+        # pasa con datos reales, pero evita dividir por 0 — todo el volumen
+        # cae en el primer nivel.
+        volumenes_deg = [0.0] * bins
+        volumenes_deg[0] = float(volume.sum())
+        return {
+            "niveles_precio": [price_min] * bins,
+            "volumenes": volumenes_deg,
+            "poc": price_min,
+            "value_area_low": price_min,
+            "value_area_high": price_min,
+            "volumen_total": volumenes_deg[0],
+        }
+
+    edges = np.linspace(price_min, price_max, bins + 1)
+    bin_left, bin_right = edges[:-1], edges[1:]
+    niveles = (bin_left + bin_right) / 2.0
+
+    candle_range = high - low
+    overlap = np.minimum(high[:, None], bin_right[None, :]) - np.maximum(low[:, None], bin_left[None, :])
+    overlap = np.clip(overlap, 0.0, None)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        weights = np.where(candle_range[:, None] > 0.0, overlap / candle_range[:, None], 0.0)
+
+    degenerate = candle_range <= 0.0
+    if degenerate.any():
+        deg_bin_idx = np.clip(np.searchsorted(edges, high[degenerate], side="right") - 1, 0, bins - 1)
+        weights[np.where(degenerate)[0], deg_bin_idx] = 1.0
+
+    volumenes = (weights * volume[:, None]).sum(axis=0)
+    total_volume = float(volumenes.sum())
+
+    poc_idx = int(np.argmax(volumenes))
+
+    va_low_idx = va_high_idx = poc_idx
+    va_volume = float(volumenes[poc_idx])
+    target = value_area_fraction * total_volume
+    while va_volume < target and (va_low_idx > 0 or va_high_idx < bins - 1):
+        vol_below = float(volumenes[va_low_idx - 1]) if va_low_idx > 0 else -1.0
+        vol_above = float(volumenes[va_high_idx + 1]) if va_high_idx < bins - 1 else -1.0
+        if vol_above >= vol_below:
+            va_high_idx += 1
+            va_volume += float(volumenes[va_high_idx])
+        else:
+            va_low_idx -= 1
+            va_volume += float(volumenes[va_low_idx])
+
+    return {
+        "niveles_precio": niveles.tolist(),
+        "volumenes": volumenes.tolist(),
+        "poc": float(niveles[poc_idx]),
+        "value_area_low": float(bin_left[va_low_idx]),
+        "value_area_high": float(bin_right[va_high_idx]),
+        "volumen_total": total_volume,
+    }
 
 
 def all_studies(df: pd.DataFrame) -> dict:

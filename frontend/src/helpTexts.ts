@@ -26,6 +26,8 @@ export const OVERLAY_HELP: Record<OverlayKey, string> = {
   pivots: "Niveles calculados a partir del rango (alto/bajo/cierre) de la vela anterior. Muy usados en trading de corto plazo; el precio puede perforarlos sin aviso.",
   vwap: "Precio promedio ponderado por volumen (ventana móvil de 20 velas). Referencia de 'valor justo' reciente — no predice hacia dónde va el precio.",
   ichimoku: "Sistema de líneas y una 'nube' que algunos traders usan para leer tendencia y soporte/resistencia. Popular, pero sin respaldo estadístico de edge probado en este proyecto.",
+  volumeProfile:
+    "Muestra CUÁNTO volumen se operó en cada NIVEL DE PRECIO del período (a diferencia del volumen normal, que es por vela/tiempo) — el histograma horizontal a la derecha del gráfico. El POC (Point of Control, resaltado) es el nivel con más volumen; el Value Area (sombreado) es el rango que concentra el 70% del volumen. Los niveles de alto volumen SUELEN actuar como soporte/resistencia porque mucha gente operó ahí, pero no es una regla garantizada: el precio puede atravesarlos sin reaccionar. Se recalcula sobre el período elegido arriba (1M/3M/1A/etc.), no sobre todo el histórico.",
 };
 
 export const OSCILLATOR_HELP: Record<OscillatorKey, string> = {

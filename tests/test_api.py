@@ -149,6 +149,46 @@ def test_get_studies_unknown_asset_returns_404() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/volume-profile (Fase 13a)
+# --------------------------------------------------------------------------
+
+
+def test_get_volume_profile_returns_poc_and_value_area() -> None:
+    response = client.get("/api/volume-profile", params={"asset": "BTC", "interval": "1d", "limit": 365, "bins": 40})
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["asset"] == "BTC"
+    assert body["interval"] == "1d"
+    assert len(body["niveles_precio"]) == 40
+    assert len(body["volumenes"]) == 40
+    assert body["niveles_precio"] == sorted(body["niveles_precio"])
+    assert body["value_area_low"] <= body["poc"] <= body["value_area_high"]
+    assert body["volumen_total"] == pytest.approx(sum(body["volumenes"]), rel=1e-6)
+
+
+def test_get_volume_profile_default_bins_is_50() -> None:
+    response = client.get("/api/volume-profile", params={"asset": "ETH", "limit": 200})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["niveles_precio"]) == 50
+
+
+def test_get_volume_profile_unknown_asset_returns_404() -> None:
+    response = client.get("/api/volume-profile", params={"asset": "DOGE"})
+
+    assert response.status_code == 404
+
+
+def test_get_volume_profile_invalid_interval_returns_400() -> None:
+    response = client.get("/api/volume-profile", params={"asset": "BTC", "interval": "5m"})
+
+    assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------
 # /api/suggester
 # --------------------------------------------------------------------------
 
@@ -665,5 +705,5 @@ def test_docs_and_openapi_schema_are_available() -> None:
         "/api/assets", "/api/ohlcv", "/api/studies", "/api/suggester",
         "/api/risk", "/api/backtest", "/api/garch-series", "/api/prediction",
         "/api/data-status", "/api/refresh", "/api/stats", "/api/compare",
-        "/api/pairs/screening", "/api/pairs/detail",
+        "/api/pairs/screening", "/api/pairs/detail", "/api/volume-profile",
     }

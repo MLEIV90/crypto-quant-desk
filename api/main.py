@@ -72,6 +72,7 @@ from api.models import (
     StatsResponse,
     StudiesResponse,
     SuggesterResponse,
+    VolumeProfileResponse,
 )
 from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
 from config import UNIVERSE
@@ -89,7 +90,7 @@ from pairs.stability import rolling_cointegration, screen_pairs_stability, stabi
 from signals.engine import generate_positions, latest_recommendation
 from signals.indicators import add_all_indicators
 from signals.returns import log_returns, simple_returns
-from signals.studies import all_studies, ichimoku, stochastic
+from signals.studies import all_studies, ichimoku, stochastic, volume_profile
 from signals.suggester import suggest
 
 logger = logging.getLogger(__name__)
@@ -376,6 +377,45 @@ def get_studies(
         fibonacci=resumen["fibonacci"],
         soporte_resistencia=resumen["soporte_resistencia"],
         pivotes=resumen["pivotes"],
+    )
+
+
+# --------------------------------------------------------------------------
+# GET /api/volume-profile
+# --------------------------------------------------------------------------
+
+
+@router.get(
+    "/volume-profile",
+    response_model=VolumeProfileResponse,
+    summary="Volume Profile: volumen operado por nivel de precio (POC + Value Area)",
+)
+def get_volume_profile(
+    asset: str,
+    interval: str = "1d",
+    limit: int = Query(
+        365, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de velas más recientes a incluir en el perfil"
+    ),
+    bins: int = Query(50, ge=10, le=200, description="Cantidad de niveles de precio en los que se divide el rango"),
+) -> VolumeProfileResponse:
+    """Reutiliza `signals.studies.volume_profile` tal cual — calcula el
+    perfil sobre las últimas `limit` velas de `_load_df(asset, interval)`
+    (el mismo recorte de "período" que ya usan `/api/ohlcv`/`/api/studies`,
+    ver `PeriodSelector` del frontend): cambiar el período recalcula el
+    perfil sobre ese rango, no sobre TODO el histórico disponible.
+    """
+    df = _load_df(asset, interval).tail(limit)
+    profile = volume_profile(df, bins=bins)
+
+    return VolumeProfileResponse(
+        asset=asset,
+        interval=interval,
+        niveles_precio=profile["niveles_precio"],
+        volumenes=profile["volumenes"],
+        poc=profile["poc"],
+        value_area_low=profile["value_area_low"],
+        value_area_high=profile["value_area_high"],
+        volumen_total=profile["volumen_total"],
     )
 
 

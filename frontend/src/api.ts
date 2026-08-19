@@ -25,6 +25,7 @@ import type {
   StatsResponse,
   StudiesResponse,
   SuggesterResponse,
+  VolumeProfileResponse,
 } from "./types";
 
 export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -100,6 +101,20 @@ export function getOhlcv(asset: string, interval: string, limit: number): Promis
 
 export function getStudies(asset: string, interval: string, limit: number): Promise<StudiesResponse> {
   return apiGet<StudiesResponse>("/api/studies", { asset, interval, limit });
+}
+
+/**
+ * Volume Profile (Fase 13a): volumen operado por nivel de precio (POC +
+ * Value Area) — ver `api/main.py::get_volume_profile`. Mismo `limit` que
+ * `/api/ohlcv`/`/api/studies`, para que el perfil respete el período
+ * elegido en `PeriodSelector` en vez de recalcularse sobre todo el histórico.
+ */
+export function getVolumeProfile(
+  asset: string,
+  interval: string,
+  limit: number,
+): Promise<VolumeProfileResponse> {
+  return apiGet<VolumeProfileResponse>("/api/volume-profile", { asset, interval, limit });
 }
 
 export function getSuggester(asset: string, interval: string): Promise<SuggesterResponse> {

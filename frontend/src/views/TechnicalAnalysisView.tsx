@@ -19,7 +19,7 @@
 import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
-import { ApiError, getOhlcv, getStudies, getSuggester } from "../api";
+import { ApiError, getOhlcv, getStudies, getSuggester, getVolumeProfile } from "../api";
 import { AlertsPanel } from "../components/AlertsPanel";
 import { Chart } from "../components/Chart";
 import { ChartTypeSelector, DEFAULT_CHART_TYPE, type ChartTypeKey } from "../components/ChartTypeSelector";
@@ -77,10 +77,20 @@ export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisView
     queryKey: ["suggester", asset, interval],
     queryFn: () => getSuggester(asset, interval),
   });
+  // Solo se pide cuando el toggle "Volume Profile" está activo (Fase 13a) —
+  // igual que /api/prediction, sin necesidad real de recalcularlo cuando el
+  // usuario no lo está mirando. Mismo candleLimit que ohlcv/studies para que
+  // el perfil respete el período elegido (PeriodSelector).
+  const volumeProfileQuery = useQuery({
+    queryKey: ["volume-profile", asset, interval, candleLimit],
+    queryFn: () => getVolumeProfile(asset, interval, candleLimit),
+    enabled: activeOverlays.has("volumeProfile"),
+  });
 
   const ohlcv = ohlcvQuery.data;
   const studies = studiesQuery.data;
   const suggester = suggesterQuery.data;
+  const volumeProfile = volumeProfileQuery.data;
 
   const isLoading = ohlcvQuery.isLoading || studiesQuery.isLoading;
   const error = ohlcvQuery.error ?? studiesQuery.error;
@@ -118,6 +128,7 @@ export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisView
               activeOverlays={activeOverlays}
               activeOscillators={activeOscillators}
               chartType={chartType}
+              volumeProfile={volumeProfile ?? null}
               onChartReady={handleChartReady}
             />
           </div>

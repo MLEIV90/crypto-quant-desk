@@ -30,7 +30,8 @@ export type OverlayKey =
   | "supportResistance"
   | "pivots"
   | "vwap"
-  | "ichimoku";
+  | "ichimoku"
+  | "volumeProfile";
 
 export const DEFAULT_ACTIVE_OVERLAYS: OverlayKey[] = ["sma20", "sma50"];
 
@@ -48,6 +49,7 @@ const BASIC_OVERLAY_OPTIONS: { key: OverlayKey; label: string }[] = [
 const ADVANCED_OVERLAY_OPTIONS: { key: OverlayKey; label: string }[] = [
   { key: "vwap", label: "VWAP" },
   { key: "ichimoku", label: "Ichimoku" },
+  { key: "volumeProfile", label: "Volume Profile" },
 ];
 
 interface StudyTogglesProps {

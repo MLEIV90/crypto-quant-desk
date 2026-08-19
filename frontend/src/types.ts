@@ -191,6 +191,17 @@ export interface CompareResponse {
   rendimiento_total_pct: Record<string, number>;
 }
 
+export interface VolumeProfileResponse {
+  asset: string;
+  interval: string;
+  niveles_precio: number[];
+  volumenes: number[];
+  poc: number;
+  value_area_low: number;
+  value_area_high: number;
+  volumen_total: number;
+}
+
 export interface PairScreeningRow {
   par: string;
   direccion: string;
