@@ -13,6 +13,7 @@
 import type {
   AssetsResponse,
   BacktestResponse,
+  CompareResponse,
   DataStatusResponse,
   GarchSeriesResponse,
   OHLCVResponse,
@@ -148,4 +149,13 @@ export function postRefresh(asset: string, interval: string): Promise<RefreshRes
  */
 export function getStats(asset: string, interval: string): Promise<StatsResponse> {
   return apiGet<StatsResponse>("/api/stats", { asset, interval });
+}
+
+/**
+ * Comparación de rendimiento normalizado a base 100 entre varios activos —
+ * ver `api/main.py::get_compare` (Fase 12a). `assets` va separado por
+ * coma (ej. "BTC,ETH,SOL"), igual que espera el endpoint.
+ */
+export function getCompare(assets: string, interval: string, limit: number): Promise<CompareResponse> {
+  return apiGet<CompareResponse>("/api/compare", { assets, interval, limit });
 }

@@ -84,6 +84,28 @@ export const VOTE_COLORS: Record<string, string> = {
   neutral: COLORS.textMuted,
 };
 
+/** Activo (`config.UNIVERSE`) -> color, usando el color de marca de cada
+ * moneda (Fase 12a, vista "Comparación") — más reconocible a simple vista
+ * que asignar colores genéricos por índice. `FALLBACK_ASSET_COLORS` cubre
+ * cualquier ticker fuera de esta lista (no debería pasar con el universo
+ * actual, pero evita quedarse sin color si se agrega un activo nuevo).
+ */
+export const ASSET_COLORS: Record<string, string> = {
+  BTC: "#f7931a",
+  ETH: "#627eea",
+  SOL: "#9945ff",
+  BNB: "#f0b90b",
+  LTC: "#345d9d",
+};
+
+export const FALLBACK_ASSET_COLORS: string[] = [
+  COLORS.accent, COLORS.success, COLORS.warning, COLORS.danger, COLORS.bollinger,
+];
+
+export function colorForAsset(asset: string, index: number): string {
+  return ASSET_COLORS[asset] ?? FALLBACK_ASSET_COLORS[index % FALLBACK_ASSET_COLORS.length];
+}
+
 function toKebabCase(camelCase: string): string {
   return camelCase.replace(/([A-Z])/g, "-$1").toLowerCase();
 }

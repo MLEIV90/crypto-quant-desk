@@ -500,6 +500,76 @@ def test_get_stats_invalid_interval_returns_400() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/compare (Fase 12a)
+# --------------------------------------------------------------------------
+
+
+def test_get_compare_all_series_start_at_100() -> None:
+    response = client.get("/api/compare", params={"assets": "BTC,ETH,SOL", "interval": "1d", "limit": 365})
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["assets"] == ["BTC", "ETH", "SOL"]
+    assert body["interval"] == "1d"
+    assert set(body["series"].keys()) == {"BTC", "ETH", "SOL"}
+
+    n = len(body["fechas"])
+    assert n > 0
+    for asset in ("BTC", "ETH", "SOL"):
+        assert len(body["series"][asset]) == n
+        assert body["series"][asset][0] == pytest.approx(100.0)
+
+    assert set(body["rendimiento_total_pct"].keys()) == {"BTC", "ETH", "SOL"}
+    # el rendimiento total del período debe ser consistente con el último
+    # valor de la serie normalizada (arranca en 100).
+    for asset in ("BTC", "ETH", "SOL"):
+        assert body["rendimiento_total_pct"][asset] == pytest.approx(body["series"][asset][-1] - 100.0, abs=1e-6)
+
+
+def test_get_compare_respects_limit() -> None:
+    response = client.get("/api/compare", params={"assets": "BTC,ETH", "interval": "1d", "limit": 30})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["fechas"]) == 30
+
+
+def test_get_compare_lowercases_are_normalized_to_uppercase() -> None:
+    response = client.get("/api/compare", params={"assets": "btc,eth", "interval": "1d", "limit": 10})
+
+    assert response.status_code == 200
+    assert response.json()["assets"] == ["BTC", "ETH"]
+
+
+def test_get_compare_single_asset_is_allowed() -> None:
+    response = client.get("/api/compare", params={"assets": "BTC", "interval": "1d", "limit": 10})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["assets"] == ["BTC"]
+    assert body["series"]["BTC"][0] == pytest.approx(100.0)
+
+
+def test_get_compare_unknown_asset_returns_404() -> None:
+    response = client.get("/api/compare", params={"assets": "BTC,DOGE", "interval": "1d"})
+
+    assert response.status_code == 404
+
+
+def test_get_compare_invalid_interval_returns_400() -> None:
+    response = client.get("/api/compare", params={"assets": "BTC,ETH", "interval": "5m"})
+
+    assert response.status_code == 400
+
+
+def test_get_compare_empty_assets_returns_400() -> None:
+    response = client.get("/api/compare", params={"assets": ""})
+
+    assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------
 # Documentación automática (Swagger/OpenAPI)
 # --------------------------------------------------------------------------
 
@@ -514,5 +584,5 @@ def test_docs_and_openapi_schema_are_available() -> None:
     assert set(paths.keys()) == {
         "/api/assets", "/api/ohlcv", "/api/studies", "/api/suggester",
         "/api/risk", "/api/backtest", "/api/garch-series", "/api/prediction",
-        "/api/data-status", "/api/refresh", "/api/stats",
+        "/api/data-status", "/api/refresh", "/api/stats", "/api/compare",
     }

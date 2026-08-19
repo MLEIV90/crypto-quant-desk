@@ -15,9 +15,9 @@ de 15-30 segundos — un frontend NUNCA debería dispararlo automáticamente
 al cargar una vista, solo ante una acción explícita del usuario (un botón
 "correr predicción"). `/api/backtest` corre un backtest vectorizado
 completo (rápido). El resto (`/api/assets`, `/api/ohlcv`, `/api/studies`,
-`/api/suggester`, `/api/data-status`, `/api/stats`) son livianos
-(indicadores/estadística vectorizados, sin ajuste de modelos). Ninguno
-cachea entre requests — cada llamada recalcula desde cero (simple y
+`/api/suggester`, `/api/data-status`, `/api/stats`, `/api/compare`) son
+livianos (indicadores/estadística vectorizados, sin ajuste de modelos).
+Ninguno cachea entre requests — cada llamada recalcula desde cero (simple y
 correcto; una capa de caché queda para una fase futura si hiciera falta).
 
 RED — `/api/refresh` (Fase 9a) es el ÚNICO endpoint de toda la API que
@@ -39,6 +39,7 @@ import pandas as pd
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from analysis.comparison import compare_assets
 from analysis.statistics import (
     BTC_HALVING_DATES,
     autocorrelation,
@@ -53,6 +54,7 @@ from api.models import (
     AutocorrelationPoint,
     BacktestResponse,
     Candle,
+    CompareResponse,
     DataStatusResponse,
     EquityPoint,
     GarchSeriesResponse,
@@ -695,6 +697,52 @@ def get_stats(asset: str, interval: str = "1d") -> StatsResponse:
         adf_precio=AdfResult(**adf_test(close)),
         adf_retornos=AdfResult(**adf_test(returns)),
         halvings_btc=list(BTC_HALVING_DATES) if asset == "BTC" else None,
+    )
+
+
+# --------------------------------------------------------------------------
+# GET /api/compare
+# --------------------------------------------------------------------------
+
+
+@router.get(
+    "/compare",
+    response_model=CompareResponse,
+    summary="Comparación de rendimiento normalizado entre activos",
+)
+def get_compare(
+    assets: str = Query(..., description="Tickers separados por coma, ej. 'BTC,ETH,SOL'"),
+    interval: str = "1d",
+    limit: int = Query(
+        365, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de fechas comunes más recientes a comparar"
+    ),
+) -> CompareResponse:
+    """Reutiliza `data.loaders.get_prices` (vía `_load_df`) para cargar cada
+    activo y `analysis.comparison.compare_assets` (Fase 12a) para alinear
+    por fechas comunes, recortar a las últimas `limit` fechas y normalizar
+    cada serie a base 100 — ningún cálculo nuevo vive acá.
+
+    Comparación de DESEMPEÑO HISTÓRICO normalizado, no una predicción — ver
+    `CompareResponse`/el texto que muestra el frontend. Si dos activos no
+    tienen NINGUNA fecha en común (no pasa con `config.UNIVERSE` actual,
+    pero es posible en teoría), devuelve `fechas`/`series` vacíos en vez de
+    fallar.
+    """
+    asset_list = [a.strip().upper() for a in assets.split(",") if a.strip()]
+    if not asset_list:
+        raise HTTPException(status_code=400, detail="'assets' no puede estar vacío")
+
+    _validate_interval(interval)
+    prices: dict[str, pd.Series] = {asset: _load_df(asset, interval)["close"] for asset in asset_list}
+
+    result = compare_assets(prices, limit=limit)
+
+    return CompareResponse(
+        assets=asset_list,
+        interval=interval,
+        fechas=_dates_to_list(result["fechas"]),
+        series={asset: _series_to_list(result["normalizado"][asset]) for asset in asset_list},
+        rendimiento_total_pct=result["rendimiento_total_pct"],
     )
 
 

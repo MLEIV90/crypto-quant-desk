@@ -1071,6 +1071,32 @@
   font-size: 0.85rem;
 }
 
+/* ---------------------------------------------------------------------
+   Vista Comparación (Fase 12a)
+   --------------------------------------------------------------------- */
+
+.comparison-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.comparison-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.comparison-legend__dot {
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  border-radius: 50%;
+}
+
 @media (max-width: 900px) {
   .technical-layout {
     grid-template-columns: 1fr;

@@ -285,3 +285,23 @@ class StatsResponse(BaseModel):
     halvings_btc: list[str] | None = Field(
         default=None, description="Fechas de halving de Bitcoin (ISO), solo presente si asset='BTC'"
     )
+
+
+class CompareResponse(BaseModel):
+    """Respuesta de `GET /api/compare` (Fase 12a) — reutiliza
+    `analysis.comparison.compare_assets` tal cual. Comparación de
+    DESEMPEÑO HISTÓRICO normalizado, no una predicción — el desempeño
+    pasado no garantiza el futuro (ver el texto que muestra el frontend).
+    """
+
+    assets: list[str] = Field(description="Activos pedidos, en el orden en que se comparan")
+    interval: str
+    fechas: list[datetime] = Field(
+        description="Fechas COMUNES a todos los activos (inner join) dentro de la ventana pedida"
+    )
+    series: dict[str, list[float | None]] = Field(
+        description="Por activo: serie normalizada a base 100 en la primera fecha de 'fechas'"
+    )
+    rendimiento_total_pct: dict[str, float] = Field(
+        description="Por activo: rendimiento total del período, en puntos porcentuales (equivalente a series[activo][-1] - 100)"
+    )

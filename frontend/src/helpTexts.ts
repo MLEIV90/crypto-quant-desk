@@ -152,3 +152,17 @@ export const HALVING_HELP =
   "ajuste estadístico). La narrativa de un 'ciclo de 4 años' post-halving es popular, pero con apenas 4 " +
   "halvings ocurridos hasta ahora es una muestra de n=4 — insuficiente para confirmar un patrón estadístico, " +
   "por más que la narrativa sea conocida.";
+
+// --------------------------------------------------------------------------
+// Vista "Comparación" (Fase 12a) — /api/compare
+// --------------------------------------------------------------------------
+
+export const COMPARISON_INTRO_HELP =
+  "Comparación de rendimiento histórico normalizado: todas las monedas elegidas arrancan en 100 el mismo " +
+  "día (la fecha más reciente en que TODAS tienen dato) y desde ahí se ve cuánto creció cada una en " +
+  "términos relativos. El desempeño pasado NO predice el futuro.";
+
+export const COMPARISON_RANKING_HELP =
+  "Rendimiento total del período elegido, de mejor a peor. Es el mismo dato que muestra el gráfico (dónde " +
+  "termina cada línea), solo ordenado — no es un ranking de calidad del activo, solo de cómo le fue en " +
+  "ESTE período puntual.";

@@ -183,6 +183,14 @@ export interface StatsResponse {
   halvings_btc: string[] | null;
 }
 
+export interface CompareResponse {
+  assets: string[];
+  interval: string;
+  fechas: string[];
+  series: Record<string, (number | null)[]>;
+  rendimiento_total_pct: Record<string, number>;
+}
+
 export interface PredictionResponse {
   asset: string;
   used_onchain: boolean;
