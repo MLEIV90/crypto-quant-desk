@@ -610,6 +610,59 @@ def test_get_compare_empty_assets_returns_400() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/correlation (Fase 13b)
+# --------------------------------------------------------------------------
+
+
+def test_get_correlation_diagonal_is_one_and_symmetric() -> None:
+    response = client.get("/api/correlation", params={"interval": "1d", "limit": 365, "method": "pearson"})
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["interval"] == "1d"
+    assert body["method"] == "pearson"
+    assert set(body["activos"]) == {"BTC", "ETH", "SOL", "BNB", "LTC"}
+    n = len(body["activos"])
+    matriz = body["matriz"]
+    assert len(matriz) == n
+    assert all(len(row) == n for row in matriz)
+
+    for i in range(n):
+        assert matriz[i][i] == pytest.approx(1.0, abs=1e-6)
+        for j in range(n):
+            assert matriz[i][j] == pytest.approx(matriz[j][i], abs=1e-6)
+
+    assert body["fechas_n"] > 0
+
+
+def test_get_correlation_spearman_method() -> None:
+    response = client.get("/api/correlation", params={"method": "spearman"})
+
+    assert response.status_code == 200
+    assert response.json()["method"] == "spearman"
+
+
+def test_get_correlation_invalid_method_returns_400() -> None:
+    response = client.get("/api/correlation", params={"method": "kendall"})
+
+    assert response.status_code == 400
+
+
+def test_get_correlation_invalid_interval_returns_400() -> None:
+    response = client.get("/api/correlation", params={"interval": "5m"})
+
+    assert response.status_code == 400
+
+
+def test_get_correlation_respects_limit() -> None:
+    response = client.get("/api/correlation", params={"limit": 30})
+
+    assert response.status_code == 200
+    assert response.json()["fechas_n"] <= 30
+
+
+# --------------------------------------------------------------------------
 # /api/pairs/screening y /api/pairs/detail (Fase 12b)
 # --------------------------------------------------------------------------
 
@@ -705,5 +758,5 @@ def test_docs_and_openapi_schema_are_available() -> None:
         "/api/assets", "/api/ohlcv", "/api/studies", "/api/suggester",
         "/api/risk", "/api/backtest", "/api/garch-series", "/api/prediction",
         "/api/data-status", "/api/refresh", "/api/stats", "/api/compare",
-        "/api/pairs/screening", "/api/pairs/detail", "/api/volume-profile",
+        "/api/pairs/screening", "/api/pairs/detail", "/api/volume-profile", "/api/correlation",
     }

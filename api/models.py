@@ -374,6 +374,25 @@ class VolumeProfileResponse(BaseModel):
     volumen_total: float = Field(description="Suma de 'volumenes' — para calcular % sobre el total en el frontend")
 
 
+class CorrelationResponse(BaseModel):
+    """Respuesta de `GET /api/correlation` (Fase 13b) — reutiliza
+    `eda.eda_report.correlation_matrix` tal cual, sobre los RETORNOS (no
+    los precios: la correlación de precios es engañosa por la no
+    estacionariedad, ver el docstring del endpoint) alineados por fechas
+    comunes (`analysis.comparison.align_common_dates`, Fase 12a).
+    """
+
+    interval: str
+    method: str = Field(description='"pearson" (lineal) o "spearman" (de rangos, monótona)')
+    fechas_n: int = Field(
+        description="Cantidad de fechas comunes efectivamente usadas — puede ser menor a 'limit' si no hay tanta historia superpuesta entre todos los activos"
+    )
+    activos: list[str] = Field(description="Orden de filas/columnas de 'matriz'")
+    matriz: list[list[float | None]] = Field(
+        description="matriz[i][j] = correlación entre activos[i] y activos[j] — simétrica, diagonal = 1.0. null si es indeterminada (p. ej. 'limit' demasiado chico)"
+    )
+
+
 class CompareResponse(BaseModel):
     """Respuesta de `GET /api/compare` (Fase 12a) — reutiliza
     `analysis.comparison.compare_assets` tal cual. Comparación de

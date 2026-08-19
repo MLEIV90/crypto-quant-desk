@@ -191,6 +191,14 @@ export interface CompareResponse {
   rendimiento_total_pct: Record<string, number>;
 }
 
+export interface CorrelationResponse {
+  interval: string;
+  method: "pearson" | "spearman";
+  fechas_n: number;
+  activos: string[];
+  matriz: (number | null)[][];
+}
+
 export interface VolumeProfileResponse {
   asset: string;
   interval: string;

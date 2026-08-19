@@ -218,6 +218,25 @@ export const ARBITRAGE_CONCEPTS_HELP = {
     "conviene operar el spread.",
 };
 
+// --------------------------------------------------------------------------
+// Vista "Correlación" (Fase 13b) — /api/correlation
+// --------------------------------------------------------------------------
+
+export const CORRELATION_INTRO_HELP =
+  "Correlación entre los RETORNOS diarios (u horarios) de cada par de monedas — no entre sus precios: " +
+  "dos precios pueden parecer muy correlacionados solo porque ambos vienen subiendo con el tiempo, sin " +
+  "que eso diga nada sobre cómo se mueven día a día. Correlación cercana a +1 = se mueven casi juntas " +
+  "(poca diversificación real entre ellas); cercana a 0 = se mueven independientes; cercana a -1 = se " +
+  "mueven en sentido opuesto. Las correlaciones NO son fijas — cambian con el tiempo y con el período " +
+  "elegido, esto es una foto del rango de arriba, no una constante del mercado.";
+
+export const CORRELATION_METHOD_HELP =
+  "Pearson mide relación LINEAL: qué tan bien un movimiento se explica como múltiplo constante del otro. " +
+  "Spearman mide relación de RANGOS (monótona): si uno sube, ¿el otro tiende a subir también, aunque no " +
+  "en la misma proporción? Spearman es más robusto a valores extremos (frecuentes en retornos cripto) y " +
+  "no asume que la relación sea una línea recta — con series muy volátiles puede dar un número algo " +
+  "distinto a Pearson sobre los mismos datos, ninguno de los dos es 'el correcto' de forma universal.";
+
 export const ARBITRAGE_NOT_OPERABLE_WARNING =
   "Este par NO está establemente cointegrado (menos del 60% de las ventanas móviles lo confirman). El " +
   "z-score de abajo puede igual mostrarse 'extremo' en este momento, pero sin cointegración estable ESO NO " +

@@ -158,19 +158,25 @@ def ljung_box_squared(returns: pd.Series, lags: int = 20, *, significance: float
     }
 
 
-def correlation_matrix(returns_dict: dict[str, pd.Series]) -> pd.DataFrame:
+def correlation_matrix(returns_dict: dict[str, pd.Series], method: str = "pearson") -> pd.DataFrame:
     """Matriz de correlación de retornos entre activos.
 
     Alinea las series por fecha con un inner join implícito (`dropna`):
     solo se usan fechas donde TODOS los activos tienen dato, para no sesgar
     la correlación con periodos donde falta alguno.
 
+    `method` (Fase 13b): "pearson" (default, correlación lineal — sensible a
+    outliers) o "spearman" (correlación de rangos — mide si dos series se
+    mueven en el mismo sentido de forma monótona, no necesariamente lineal;
+    más robusta a valores extremos, típicos en retornos cripto). Pasa
+    directo a `pd.DataFrame.corr`, sin cálculo propio.
+
     Insumo para la selección de candidatos a pares en la Fase 2 (stat-arb):
     activos muy correlacionados son los primeros candidatos a testear por
     cointegración.
     """
     df = pd.DataFrame(returns_dict).dropna(how="any")
-    return df.corr()
+    return df.corr(method=method)
 
 
 # --------------------------------------------------------------------------

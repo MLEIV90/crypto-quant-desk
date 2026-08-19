@@ -104,3 +104,18 @@ def test_correlation_matrix_aligns_by_date_and_diagonal_is_one() -> None:
     assert list(corr.columns) == ["A", "B"]
     assert corr.loc["A", "A"] == pytest.approx(1.0)
     assert corr.loc["A", "B"] == pytest.approx(1.0)
+
+
+def test_correlation_matrix_spearman_is_robust_to_monotonic_nonlinearity() -> None:
+    # b = a**3 no es una relación LINEAL (pearson < 1) pero SÍ es monótona
+    # (spearman = 1) -- ejercita que method="spearman" de verdad cambia el
+    # resultado, no solo se ignora.
+    idx = pd.date_range("2021-01-01", periods=30, freq="D")
+    a = pd.Series(np.linspace(-1.0, 1.0, 30), index=idx)
+    b = a**3
+
+    pearson = correlation_matrix({"A": a, "B": b}, method="pearson")
+    spearman = correlation_matrix({"A": a, "B": b}, method="spearman")
+
+    assert spearman.loc["A", "B"] == pytest.approx(1.0)
+    assert pearson.loc["A", "B"] < 0.999

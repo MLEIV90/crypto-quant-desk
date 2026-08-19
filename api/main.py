@@ -39,7 +39,7 @@ import pandas as pd
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from analysis.comparison import compare_assets
+from analysis.comparison import align_common_dates, compare_assets
 from analysis.statistics import (
     BTC_HALVING_DATES,
     autocorrelation,
@@ -55,6 +55,7 @@ from api.models import (
     BacktestResponse,
     Candle,
     CompareResponse,
+    CorrelationResponse,
     DataStatusResponse,
     EquityPoint,
     GarchSeriesResponse,
@@ -78,7 +79,7 @@ from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
 from config import UNIVERSE
 from data.loaders import get_prices
 from data.snapshot import GeoblockedError, last_closed_candle_open_time, update_snapshot
-from eda.eda_report import adf_test
+from eda.eda_report import adf_test, correlation_matrix
 from metrics.risk_measures import expected_shortfall, value_at_risk
 from ml.features import align_features_labels, build_feature_matrix
 from ml.labeling import get_daily_volatility, triple_barrier_labels
@@ -940,6 +941,59 @@ def get_pairs_detail(asset_y: str, asset_x: str, interval: str = "1d") -> PairDe
         zscore_interpretacion=_interpret_zscore(z_actual),
         estabilidad=estabilidad,
         estabilidad_mensaje=estabilidad_mensaje,
+    )
+
+
+# --------------------------------------------------------------------------
+# GET /api/correlation
+# --------------------------------------------------------------------------
+
+CORRELATION_METHODS: tuple[str, ...] = ("pearson", "spearman")
+
+
+@router.get(
+    "/correlation",
+    response_model=CorrelationResponse,
+    summary="Matriz de correlación entre activos (sobre RETORNOS, no precios)",
+)
+def get_correlation(
+    interval: str = "1d",
+    limit: int = Query(
+        365, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de fechas comunes más recientes a usar"
+    ),
+    method: str = "pearson",
+) -> CorrelationResponse:
+    """Reutiliza `eda.eda_report.correlation_matrix` (Fase 1) para el
+    cálculo y `analysis.comparison.align_common_dates` (Fase 12a) para
+    recortar al período pedido — mismo patrón que `/api/compare`: alinea
+    por fechas comunes y recorta a las últimas `limit`, así "el período
+    elegido" corta la ventana ANTES de correlacionar, no después.
+
+    Correlación de RETORNOS, no de precios: dos precios pueden estar muy
+    correlacionados solo porque ambos tienen tendencia (no estacionariedad),
+    sin que eso diga nada sobre si se mueven juntos día a día — ver
+    `eda.eda_report.correlation_matrix` y el texto que muestra el frontend.
+    """
+    _validate_interval(interval)
+    if method not in CORRELATION_METHODS:
+        raise HTTPException(
+            status_code=400, detail=f"method debe ser uno de {list(CORRELATION_METHODS)}, recibido '{method}'"
+        )
+
+    assets = list(UNIVERSE)
+    returns = {asset: simple_returns(_load_df(asset, interval)["close"]).dropna() for asset in assets}
+    aligned = align_common_dates(returns).tail(limit)
+    trimmed_returns = {asset: aligned[asset] for asset in assets}
+
+    corr_df = correlation_matrix(trimmed_returns, method=method)
+    matriz = [[_none_if_nan(corr_df.loc[row, col]) for col in assets] for row in assets]
+
+    return CorrelationResponse(
+        interval=interval,
+        method=method,
+        fechas_n=len(aligned),
+        activos=assets,
+        matriz=matriz,
     )
 
 

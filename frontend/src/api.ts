@@ -14,6 +14,7 @@ import type {
   AssetsResponse,
   BacktestResponse,
   CompareResponse,
+  CorrelationResponse,
   DataStatusResponse,
   GarchSeriesResponse,
   OHLCVResponse,
@@ -175,6 +176,14 @@ export function getStats(asset: string, interval: string): Promise<StatsResponse
  */
 export function getCompare(assets: string, interval: string, limit: number): Promise<CompareResponse> {
   return apiGet<CompareResponse>("/api/compare", { assets, interval, limit });
+}
+
+/**
+ * Matriz de correlación entre activos sobre RETORNOS (Fase 13b) — ver
+ * `api/main.py::get_correlation`. `method` es "pearson" o "spearman".
+ */
+export function getCorrelation(interval: string, limit: number, method: string): Promise<CorrelationResponse> {
+  return apiGet<CorrelationResponse>("/api/correlation", { interval, limit, method });
 }
 
 /**

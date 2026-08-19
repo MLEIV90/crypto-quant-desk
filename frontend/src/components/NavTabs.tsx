@@ -10,7 +10,8 @@ export type ViewKey =
   | "research"
   | "estadistica"
   | "comparacion"
-  | "arbitraje";
+  | "arbitraje"
+  | "correlacion";
 
 const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "tecnico", label: "Análisis Técnico" },
@@ -20,6 +21,7 @@ const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "estadistica", label: "Estadística" },
   { key: "comparacion", label: "Comparación" },
   { key: "arbitraje", label: "Arbitraje" },
+  { key: "correlacion", label: "Correlación" },
 ];
 
 interface NavTabsProps {
