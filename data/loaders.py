@@ -119,8 +119,18 @@ def get_prices(
     start = start or RAW_START_DATE
     end = end or pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
 
+    # "store" ignora `use_cache` a propósito (Fase 12b, mismo hallazgo que
+    # api/main.py::_load_df en Fase 9a): esa fuente ya lee un archivo local
+    # (SNAPSHOT_DIR) directamente en `_load_store` — cachear OTRA copia en
+    # data/cache/ no ahorra nada (la lectura original ya es rápida, no toca
+    # la red) y sí puede quedar desactualizada después de un refresh del
+    # snapshot (`POST /api/refresh`), sirviendo datos viejos para siempre a
+    # cualquier llamada futura con `source="store"` que no pase
+    # `use_cache=False` explícito — como pasaba con `pairs.cointegration`/
+    # `pairs.stability`, que llaman `get_prices(source="store")` sin ese
+    # flag.
     cache_path = _cache_path(asset, source, interval)
-    if use_cache and cache_path.exists():
+    if use_cache and source != "store" and cache_path.exists():
         df = _read_cache(cache_path)
         return _slice(df, start, end)
 
@@ -136,7 +146,7 @@ def get_prices(
             last_exc = exc
             continue
 
-        if use_cache:
+        if use_cache and src != "store":
             _write_cache(df, _cache_path(asset, src, interval))
         return _slice(df, start, end)
 

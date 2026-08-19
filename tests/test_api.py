@@ -570,6 +570,86 @@ def test_get_compare_empty_assets_returns_400() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/pairs/screening y /api/pairs/detail (Fase 12b)
+# --------------------------------------------------------------------------
+
+
+def test_get_pairs_screening_returns_ranked_table() -> None:
+    response = client.get("/api/pairs/screening")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["interval"] == "1d"
+    assert body["n_total"] > 0
+    assert body["n_total"] == len(body["filas"])
+    assert body["n_estables"] <= body["n_total"]
+
+    fracciones = [fila["fraccion_cointegrada"] for fila in body["filas"]]
+    assert fracciones == sorted(fracciones, reverse=True)
+
+    for fila in body["filas"]:
+        assert "-" in fila["par"]
+        assert "~" in fila["direccion"]
+        assert 0.0 <= fila["fraccion_cointegrada"] <= 1.0
+        assert isinstance(fila["estable"], bool)
+        assert fila["estable"] == (fila["fraccion_cointegrada"] >= 0.6)
+
+
+def test_get_pairs_screening_rejects_non_daily_interval() -> None:
+    response = client.get("/api/pairs/screening", params={"interval": "1h"})
+
+    assert response.status_code == 400
+
+
+def test_get_pairs_detail_returns_cointegration_spread_and_zscore() -> None:
+    response = client.get("/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "interval": "1d"})
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["asset_y"] == "ETH"
+    assert body["asset_x"] == "BTC"
+    assert body["interval"] == "1d"
+    assert isinstance(body["beta"], float)
+    assert isinstance(body["es_cointegrado"], bool)
+    assert 0.0 <= body["p_valor_adf"] <= 1.0
+
+    n = len(body["fechas"])
+    assert n > 0
+    assert len(body["spread"]) == n
+    assert len(body["zscore"]) == n
+    # el z-score expansivo tiene warmup en NaN/null al principio de la serie
+    assert body["zscore"][0] is None
+    assert body["zscore"][-1] is not None
+    assert body["zscore_actual"] == pytest.approx(body["zscore"][-1])
+    assert "z=" in body["zscore_interpretacion"]
+
+    if body["estabilidad"] is not None:
+        assert 0.0 <= body["estabilidad"]["fraccion_cointegrada"] <= 1.0
+        assert body["estabilidad_mensaje"] is None
+    else:
+        assert body["estabilidad_mensaje"] is not None
+
+
+def test_get_pairs_detail_same_asset_returns_400() -> None:
+    response = client.get("/api/pairs/detail", params={"asset_y": "BTC", "asset_x": "BTC"})
+
+    assert response.status_code == 400
+
+
+def test_get_pairs_detail_unknown_asset_returns_404() -> None:
+    response = client.get("/api/pairs/detail", params={"asset_y": "DOGE", "asset_x": "BTC"})
+
+    assert response.status_code == 404
+
+
+def test_get_pairs_detail_invalid_interval_returns_400() -> None:
+    response = client.get("/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "interval": "5m"})
+
+    assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------
 # Documentación automática (Swagger/OpenAPI)
 # --------------------------------------------------------------------------
 
@@ -585,4 +665,5 @@ def test_docs_and_openapi_schema_are_available() -> None:
         "/api/assets", "/api/ohlcv", "/api/studies", "/api/suggester",
         "/api/risk", "/api/backtest", "/api/garch-series", "/api/prediction",
         "/api/data-status", "/api/refresh", "/api/stats", "/api/compare",
+        "/api/pairs/screening", "/api/pairs/detail",
     }

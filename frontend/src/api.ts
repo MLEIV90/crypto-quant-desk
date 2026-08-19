@@ -17,6 +17,8 @@ import type {
   DataStatusResponse,
   GarchSeriesResponse,
   OHLCVResponse,
+  PairDetailResponse,
+  PairScreeningResponse,
   PredictionResponse,
   RefreshResponse,
   RiskResponse,
@@ -158,4 +160,22 @@ export function getStats(asset: string, interval: string): Promise<StatsResponse
  */
 export function getCompare(assets: string, interval: string, limit: number): Promise<CompareResponse> {
   return apiGet<CompareResponse>("/api/compare", { assets, interval, limit });
+}
+
+/**
+ * Ranking honesto de operabilidad de pares — ver `api/main.py::get_pairs_screening`
+ * (Fase 12b, `pairs.stability.screen_pairs_stability`). Solo soporta
+ * `interval="1d"` (la función reutilizada siempre carga precios diarios).
+ */
+export function getPairsScreening(interval: string = "1d"): Promise<PairScreeningResponse> {
+  return apiGet<PairScreeningResponse>("/api/pairs/screening", { interval });
+}
+
+/**
+ * Detalle de un par: cointegración, spread, z-score y estabilidad rolling —
+ * ver `api/main.py::get_pairs_detail` (Fase 12b). A diferencia del
+ * screening, sí respeta `interval`.
+ */
+export function getPairsDetail(assetY: string, assetX: string, interval: string): Promise<PairDetailResponse> {
+  return apiGet<PairDetailResponse>("/api/pairs/detail", { asset_y: assetY, asset_x: assetX, interval });
 }

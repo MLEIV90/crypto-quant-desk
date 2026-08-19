@@ -166,3 +166,58 @@ export const COMPARISON_RANKING_HELP =
   "Rendimiento total del período elegido, de mejor a peor. Es el mismo dato que muestra el gráfico (dónde " +
   "termina cada línea), solo ordenado — no es un ranking de calidad del activo, solo de cómo le fue en " +
   "ESTE período puntual.";
+
+// --------------------------------------------------------------------------
+// Vista "Arbitraje" (Fase 12b) — /api/pairs/screening, /api/pairs/detail.
+// ENCUADRE HONESTO: esto es arbitraje ESTADÍSTICO (pairs trading), NO
+// arbitraje entre exchanges (no hay diferencia de precio del mismo activo
+// entre dos mercados acá). La Fase 2 de este proyecto ya mostró que la
+// mayoría de los pares de config.UNIVERSE NO están establemente
+// cointegrados — esta vista muestra ese resultado tal cual, sin maquillar.
+// --------------------------------------------------------------------------
+
+export const ARBITRAGE_INTRO_HELP =
+  "Esto es arbitraje ESTADÍSTICO ('pairs trading'), no arbitraje entre exchanges: no se compra y vende el " +
+  "mismo activo en dos mercados, se busca un PAR de monedas cuyos precios se mueven juntos de forma estable, " +
+  "para apostar a que un desvío temporal entre ellas revierte. Con las 5 monedas de este proyecto, la mayoría " +
+  "de los pares NO cumplen esa condición de forma estable — el ranking de abajo lo muestra tal cual.";
+
+export const ARBITRAGE_SCREENING_HELP =
+  "Por cada par se re-testea cointegración en ventanas móviles de ~1 año (en vez de una sola vez sobre toda " +
+  "la historia) y se mide en qué fracción de esas ventanas el par siguió cointegrado. 'Estable/operable' " +
+  "(verde) requiere que esa fracción sea de al menos 60% — un par cointegrado en una sola foto histórica, " +
+  "pero no de forma consistente en el tiempo, se marca en rojo: no hay evidencia de que la relación se " +
+  "sostenga hacia adelante. Siempre calculado sobre velas DIARIAS, sin importar el timeframe elegido arriba.";
+
+export const ARBITRAGE_CONCEPTS_HELP = {
+  cointegracion:
+    "Dos activos están cointegrados si, aunque cada uno individualmente se mueva como un 'paseo aleatorio' " +
+    "(sin nivel fijo), existe una combinación lineal de ambos (el spread) que sí es estable y vuelve a su " +
+    "media. Es la condición de base para que un spread entre dos monedas sea operable — sin ella, no hay " +
+    "ancla que garantice que un desvío revierta.",
+  spread:
+    "Diferencia entre el log-precio de la moneda Y y beta veces el log-precio de la moneda X (el residuo de " +
+    "la regresión que estima 'beta', el hedge ratio). Si el par está genuinamente cointegrado, este spread " +
+    "oscila alrededor de un nivel estable en vez de irse a cualquier lado sin límite.",
+  zscore:
+    "Qué tan lejos está el spread de HOY respecto de su propio promedio histórico, medido en desvíos " +
+    "estándar. z=0 es el promedio; |z|>2 se considera una zona extrema. Un z-score alto NO es una señal " +
+    "confiable de por sí — solo tiene sentido si el par de abajo está establemente cointegrado (ver el " +
+    "veredicto de estabilidad).",
+  halfLife:
+    "Vida media de reversión: cuántos períodos (días u horas, según el timeframe elegido) tardaría, en " +
+    "promedio, un desvío del spread en reducirse a la mitad — asumiendo que el spread efectivamente revierte. " +
+    "'Sin dato' significa que, en la muestra usada, el spread no mostró reversión a la media (podría ser un " +
+    "paseo aleatorio disfrazado de spread).",
+  estabilidad:
+    "Fracción de ventanas móviles de ~1 año en las que el par siguió cointegrado. Un p-valor bajo calculado " +
+    "sobre TODA la historia de una sola vez (como en la tarjeta '¿cointegrado?') puede esconder que la " +
+    "relación solo se sostuvo en un tramo puntual — esta fracción es el filtro más honesto de si de verdad " +
+    "conviene operar el spread.",
+};
+
+export const ARBITRAGE_NOT_OPERABLE_WARNING =
+  "Este par NO está establemente cointegrado (menos del 60% de las ventanas móviles lo confirman). El " +
+  "z-score de abajo puede igual mostrarse 'extremo' en este momento, pero sin cointegración estable ESO NO " +
+  "ES UNA SEÑAL CONFIABLE: no hay garantía estadística de que el spread vaya a revertir. Tratá este análisis " +
+  "como una exploración, no como una recomendación para operar.";

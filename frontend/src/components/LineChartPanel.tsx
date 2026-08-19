@@ -5,10 +5,16 @@
  * vida que `components/Chart.tsx` (crear el chart una vez, reconstruir
  * las series cuando cambian los datos) pero sin velas ni panes de
  * osciladores — solo N líneas en un único pane.
+ *
+ * `referenceLines` (Fase 12b, vista "Arbitraje"): líneas horizontales
+ * opcionales (`series.createPriceLine()`, misma primitiva que ya usa
+ * `Chart.tsx` para Fibonacci/soporte-resistencia/pivotes) ancladas a la
+ * PRIMERA serie — pensadas para las bandas de z-score (+2/-2/0), pero
+ * genéricas para cualquier gráfico de línea futuro que las necesite.
  */
 
 import { useEffect, useRef } from "react";
-import { ColorType, createChart, CrosshairMode, LineSeries } from "lightweight-charts";
+import { ColorType, createChart, CrosshairMode, LineSeries, LineStyle } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from "lightweight-charts";
 import { COLORS } from "../theme";
 
@@ -20,16 +26,23 @@ export interface LineSeriesSpec {
   lineWidth?: 1 | 2 | 3 | 4;
 }
 
+export interface ReferenceLineSpec {
+  price: number;
+  label?: string;
+  color?: string;
+}
+
 interface LineChartPanelProps {
   series: LineSeriesSpec[];
   height?: number;
+  referenceLines?: ReferenceLineSpec[];
 }
 
 function toTimestamp(iso: string): UTCTimestamp {
   return Math.floor(new Date(iso).getTime() / 1000) as UTCTimestamp;
 }
 
-export function LineChartPanel({ series, height = 320 }: LineChartPanelProps) {
+export function LineChartPanel({ series, height = 320, referenceLines = [] }: LineChartPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesApiRef = useRef<ISeriesApi<"Line", Time>[]>([]);
@@ -77,8 +90,22 @@ export function LineChartPanel({ series, height = 320 }: LineChartPanelProps) {
       return lineSeries;
     });
 
+    const anchor = seriesApiRef.current[0];
+    if (anchor) {
+      referenceLines.forEach((ref) => {
+        anchor.createPriceLine({
+          price: ref.price,
+          color: ref.color ?? COLORS.textMuted,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: ref.label ?? "",
+        });
+      });
+    }
+
     chart.timeScale().fitContent();
-  }, [series]);
+  }, [series, referenceLines]);
 
   return <div ref={containerRef} className="chart-container" style={{ height }} />;
 }

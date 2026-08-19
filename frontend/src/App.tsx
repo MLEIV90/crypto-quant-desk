@@ -20,6 +20,7 @@ import { BacktestView } from "./views/BacktestView";
 import { ResearchView } from "./views/ResearchView";
 import { StatisticsView } from "./views/StatisticsView";
 import { ComparisonView } from "./views/ComparisonView";
+import { ArbitrageView } from "./views/ArbitrageView";
 
 const DEFAULT_ASSET = "BTC";
 const DEFAULT_INTERVAL = "1d";
@@ -42,11 +43,13 @@ function Dashboard() {
 
   // Riesgo/Backtest/Research siempre operan en diario (DEFAULT_RISK_INTERVAL
   // en api/main.py) — el selector de timeframe ni se muestra ahí (ver
-  // AssetSelector.showTimeframe). Estadística (Fase 11) y Comparación
-  // (Fase 12a) SÍ soportan horario, así que ahí el selector queda visible
-  // igual que en Análisis Técnico.
+  // AssetSelector.showTimeframe). Estadística (Fase 11), Comparación
+  // (Fase 12a) y el DETALLE de un par en Arbitraje (Fase 12b, no el
+  // screening — ese siempre es diario, ver ArbitrageView) SÍ soportan
+  // horario, así que ahí el selector queda visible igual que en Análisis
+  // Técnico.
   const showTimeframeSelector =
-    activeView === "tecnico" || activeView === "estadistica" || activeView === "comparacion";
+    activeView === "tecnico" || activeView === "estadistica" || activeView === "comparacion" || activeView === "arbitraje";
   const dataStatusInterval = showTimeframeSelector ? interval : "1d";
 
   return (
@@ -77,6 +80,7 @@ function Dashboard() {
       {activeView === "research" && <ResearchView asset={asset} />}
       {activeView === "estadistica" && <StatisticsView asset={asset} interval={interval} />}
       {activeView === "comparacion" && <ComparisonView assets={assets} interval={interval} />}
+      {activeView === "arbitraje" && <ArbitrageView assets={assets} interval={interval} />}
     </div>
   );
 }

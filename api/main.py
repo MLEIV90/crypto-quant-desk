@@ -59,6 +59,10 @@ from api.models import (
     EquityPoint,
     GarchSeriesResponse,
     OHLCVResponse,
+    PairDetailResponse,
+    PairScreeningResponse,
+    PairScreeningRow,
+    PairStabilitySummary,
     PeriodogramResponse,
     PeriodogramTopPeriod,
     PredictionResponse,
@@ -79,6 +83,9 @@ from ml.features import align_features_labels, build_feature_matrix
 from ml.labeling import get_daily_volatility, triple_barrier_labels
 from ml.models import evaluate_primary_with_roc_auc, feature_importances, fit_final, latest_oos_prediction, t1_from_labels
 from models.garch import conditional_volatility, select_best_model, volatility_regime
+from pairs.cointegration import engle_granger, half_life
+from pairs.signals import zscore
+from pairs.stability import rolling_cointegration, screen_pairs_stability, stability_summary
 from signals.engine import generate_positions, latest_recommendation
 from signals.indicators import add_all_indicators
 from signals.returns import log_returns, simple_returns
@@ -222,6 +229,27 @@ def _seasonality_to_buckets(df: pd.DataFrame, *, has_median_std: bool) -> list[S
             )
         )
     return buckets
+
+
+def _none_if_nonfinite(value: float) -> float | None:
+    """Como `_none_if_nan` pero también convierte +-inf a None (Fase 12b:
+    `pairs.cointegration.half_life` devuelve `float('inf')` cuando el
+    spread no revierte — JSON no tiene un literal válido para infinito).
+    """
+    return None if pd.isna(value) or value in (float("inf"), float("-inf")) else float(value)
+
+
+_ZSCORE_EXTREME_THRESHOLD = 2.0
+
+
+def _interpret_zscore(z: float | None) -> str:
+    """Texto honesto sobre qué tan 'estirado' está el spread hoy (Fase 12b)."""
+    if z is None or pd.isna(z):
+        return "Sin suficiente historia todavía para calcular el z-score."
+    if abs(z) > _ZSCORE_EXTREME_THRESHOLD:
+        direccion = "por encima" if z > 0 else "por debajo"
+        return f"Zona EXTREMA: el spread está muy {direccion} de su media histórica (z={z:.2f})."
+    return f"Zona normal: el spread está dentro de su rango habitual (z={z:.2f})."
 
 
 def _humanize_age(delta: pd.Timedelta) -> str:
@@ -743,6 +771,135 @@ def get_compare(
         fechas=_dates_to_list(result["fechas"]),
         series={asset: _series_to_list(result["normalizado"][asset]) for asset in asset_list},
         rendimiento_total_pct=result["rendimiento_total_pct"],
+    )
+
+
+# --------------------------------------------------------------------------
+# GET /api/pairs/screening
+# --------------------------------------------------------------------------
+
+
+@router.get(
+    "/pairs/screening",
+    response_model=PairScreeningResponse,
+    summary="Ranking de operabilidad de pares (arbitraje estadístico)",
+)
+def get_pairs_screening(interval: str = "1d") -> PairScreeningResponse:
+    """Reutiliza `pairs.stability.screen_pairs_stability` tal cual (NO
+    reimplementa nada de `pairs/`) — corre cointegración rolling sobre
+    todas las combinaciones de `config.UNIVERSE` y arma el ranking honesto
+    de operabilidad.
+
+    `interval` solo acepta `"1d"` por ahora: `screen_pairs_stability` carga
+    los precios con `get_prices(asset, source="store")` SIN pasar
+    `interval` (usa el default de esa función, diario), y sus ventanas
+    rolling (365 observaciones / paso de 30) están calibradas para datos
+    diarios — no para horas. Pedir `interval="1h"` da 400 en vez de devolver
+    silenciosamente un resultado diario disfrazado de horario.
+
+    ENCUADRE: esto es arbitraje ESTADÍSTICO (pairs trading) sobre las 5
+    monedas de `config.UNIVERSE`, no arbitraje entre exchanges. La Fase 2 ya
+    mostró que la mayoría de estos pares NO están establemente cointegrados
+    — este endpoint expone ese resultado tal cual, sin maquillarlo (ver
+    `estable` por fila y el texto de la vista "Arbitraje" del frontend).
+    """
+    if interval != "1d":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "El screening de pares (pairs.stability.screen_pairs_stability) solo soporta "
+                "interval='1d': sus ventanas rolling (365/30 observaciones) están calibradas "
+                "para velas diarias."
+            ),
+        )
+
+    table = screen_pairs_stability()
+    filas = [
+        PairScreeningRow(
+            par=str(row["par"]),
+            direccion=str(row["direccion"]),
+            n_ventanas=int(row["n_ventanas"]),
+            fraccion_cointegrada=float(row["fraccion_cointegrada"]),
+            beta_medio=float(row["beta_medio"]),
+            beta_std=float(row["beta_std"]),
+            estable=bool(row["estable"]),
+        )
+        for _, row in table.iterrows()
+    ]
+    return PairScreeningResponse(
+        interval=interval,
+        filas=filas,
+        n_estables=int(table["estable"].sum()),
+        n_total=len(table),
+    )
+
+
+# --------------------------------------------------------------------------
+# GET /api/pairs/detail
+# --------------------------------------------------------------------------
+
+
+@router.get(
+    "/pairs/detail",
+    response_model=PairDetailResponse,
+    summary="Detalle de un par: cointegración, spread, z-score y estabilidad rolling",
+)
+def get_pairs_detail(asset_y: str, asset_x: str, interval: str = "1d") -> PairDetailResponse:
+    """Reutiliza `pairs.cointegration.engle_granger`/`half_life` y
+    `pairs.stability.rolling_cointegration`/`stability_summary` tal cual (NO
+    reimplementa nada de `pairs/`) sobre precios cargados vía `_load_df`
+    (mismo punto de entrada que el resto de la API, respeta `interval`
+    de verdad — a diferencia de `/api/pairs/screening`, acá SÍ se puede
+    pedir `interval="1h"`).
+
+    Si no hay historia suficiente para ni una ventana rolling completa
+    (`pairs.stability.rolling_cointegration` pide 365 observaciones por
+    defecto — con `interval="1h"` puede no alcanzar), `estabilidad` viaja en
+    `null` con el motivo en `estabilidad_mensaje`, en vez de fallar el
+    endpoint entero: el resto del análisis (cointegración in-sample, spread,
+    z-score) sigue siendo válido igual.
+    """
+    _validate_asset(asset_y)
+    _validate_asset(asset_x)
+    if asset_y == asset_x:
+        raise HTTPException(status_code=400, detail="asset_y y asset_x deben ser distintos")
+    _validate_interval(interval)
+
+    y = _load_df(asset_y, interval)["close"]
+    x = _load_df(asset_x, interval)["close"]
+
+    eg = engle_granger(y, x)
+    spread = eg["spread"]
+    hl = half_life(spread)
+    z = zscore(spread)
+    z_actual = _none_if_nan(float(z.iloc[-1])) if len(z) else None
+
+    try:
+        rolling = rolling_cointegration(y, x)
+        summary = stability_summary(rolling)
+        estabilidad = PairStabilitySummary(**summary)
+        estabilidad_mensaje = None
+    except ValueError as exc:
+        estabilidad = None
+        estabilidad_mensaje = f"No se pudo evaluar estabilidad rolling: {exc}"
+
+    return PairDetailResponse(
+        asset_y=asset_y,
+        asset_x=asset_x,
+        interval=interval,
+        beta=eg["beta"],
+        alpha=eg["alpha"],
+        estadistico_adf=eg["estadistico_adf"],
+        p_valor_adf=eg["p_valor_adf"],
+        es_cointegrado=eg["es_cointegrado"],
+        half_life_dias=_none_if_nonfinite(hl),
+        fechas=_dates_to_list(spread.index),
+        spread=_series_to_list(spread),
+        zscore=_series_to_list(z),
+        zscore_actual=z_actual,
+        zscore_interpretacion=_interpret_zscore(z_actual),
+        estabilidad=estabilidad,
+        estabilidad_mensaje=estabilidad_mensaje,
     )
 
 

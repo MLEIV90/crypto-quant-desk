@@ -191,6 +191,50 @@ export interface CompareResponse {
   rendimiento_total_pct: Record<string, number>;
 }
 
+export interface PairScreeningRow {
+  par: string;
+  direccion: string;
+  n_ventanas: number;
+  fraccion_cointegrada: number;
+  beta_medio: number;
+  beta_std: number;
+  estable: boolean;
+}
+
+export interface PairScreeningResponse {
+  interval: string;
+  filas: PairScreeningRow[];
+  n_estables: number;
+  n_total: number;
+}
+
+export interface PairStabilitySummary {
+  n_ventanas: number;
+  fraccion_cointegrada: number;
+  beta_medio: number;
+  beta_std: number;
+  estable: boolean;
+}
+
+export interface PairDetailResponse {
+  asset_y: string;
+  asset_x: string;
+  interval: string;
+  beta: number;
+  alpha: number;
+  estadistico_adf: number;
+  p_valor_adf: number;
+  es_cointegrado: boolean;
+  half_life_dias: number | null;
+  fechas: string[];
+  spread: (number | null)[];
+  zscore: (number | null)[];
+  zscore_actual: number | null;
+  zscore_interpretacion: string;
+  estabilidad: PairStabilitySummary | null;
+  estabilidad_mensaje: string | null;
+}
+
 export interface PredictionResponse {
   asset: string;
   used_onchain: boolean;

@@ -287,6 +287,74 @@ class StatsResponse(BaseModel):
     )
 
 
+class PairScreeningRow(BaseModel):
+    """Una fila de `pairs.stability.screen_pairs_stability` (Fase 12b) —
+    el ranking honesto de operabilidad de un par, reutilizado tal cual.
+    """
+
+    par: str = Field(description='Par, formato "A-B" (orden alfabético, no implica dirección)')
+    direccion: str = Field(description='Dirección con mejor fracción cointegrada, formato "Y~X" (Y es el activo dependiente)')
+    n_ventanas: int = Field(description="Cantidad de ventanas rolling testeadas")
+    fraccion_cointegrada: float = Field(description="Proporción de ventanas con cointegración detectada, en [0, 1]")
+    beta_medio: float = Field(description="Media del hedge ratio estático estimado por ventana")
+    beta_std: float = Field(description="Desvío del hedge ratio entre ventanas — alto = relación inestable")
+    estable: bool = Field(description="True si fraccion_cointegrada >= umbral (0.6 por defecto) — el veredicto operable/no operable")
+
+
+class PairScreeningResponse(BaseModel):
+    """Respuesta de `GET /api/pairs/screening` — reutiliza
+    `pairs.stability.screen_pairs_stability` tal cual. Solo opera en velas
+    DIARIAS (esa función carga precios sin parámetro de intervalo, y sus
+    ventanas de 365/30 observaciones están calibradas para datos diarios) —
+    ver el docstring del endpoint.
+    """
+
+    interval: str
+    filas: list[PairScreeningRow] = Field(description="Ordenado por fraccion_cointegrada descendente (ranking de operabilidad)")
+    n_estables: int = Field(description="Cantidad de pares con estable=True")
+    n_total: int = Field(description="Cantidad total de pares evaluados")
+
+
+class PairStabilitySummary(BaseModel):
+    """`pairs.stability.stability_summary` para UN par, tal cual (mismos campos que `PairScreeningRow` sin par/dirección)."""
+
+    n_ventanas: int
+    fraccion_cointegrada: float
+    beta_medio: float
+    beta_std: float
+    estable: bool
+
+
+class PairDetailResponse(BaseModel):
+    """Respuesta de `GET /api/pairs/detail` (Fase 12b) — análisis completo
+    de UN par vía `pairs.cointegration.engle_granger`/`half_life` y
+    `pairs.stability.rolling_cointegration`/`stability_summary`, tal cual.
+    Arbitraje ESTADÍSTICO (pairs trading), no arbitraje entre exchanges —
+    ver el texto de la vista "Arbitraje" del frontend.
+    """
+
+    asset_y: str = Field(description="Activo dependiente (\"y\" de la regresión log(y) = alpha + beta*log(x) + spread)")
+    asset_x: str
+    interval: str
+    beta: float = Field(description="Hedge ratio estático")
+    alpha: float = Field(description="Intercepto de la regresión")
+    estadistico_adf: float
+    p_valor_adf: float = Field(description="p-valor del test ADF sobre el spread IN-SAMPLE (toda la muestra a la vez)")
+    es_cointegrado: bool = Field(description="Cointegración IN-SAMPLE — ver 'estabilidad' para el veredicto rolling, más honesto")
+    half_life_dias: float | None = Field(
+        description="Vida media de reversión, en velas del interval pedido. null si el spread no revierte (theta>=0, ver pairs.cointegration.half_life)"
+    )
+    fechas: list[datetime]
+    spread: list[float | None] = Field(description="log(y) - alpha - beta*log(x), residuo de la regresión de cointegración")
+    zscore: list[float | None] = Field(description="Z-score expansivo del spread (pairs.signals.zscore)")
+    zscore_actual: float | None = Field(description="Último valor del z-score — qué tan 'estirado' está el spread HOY")
+    zscore_interpretacion: str = Field(description="Texto honesto: zona normal vs. extrema (|z|>2), o sin datos suficientes")
+    estabilidad: PairStabilitySummary | None = Field(
+        default=None, description="null si no hay historia suficiente para ni una ventana rolling (ver estabilidad_mensaje)"
+    )
+    estabilidad_mensaje: str | None = Field(default=None, description="Explica por qué 'estabilidad' es null, si aplica")
+
+
 class CompareResponse(BaseModel):
     """Respuesta de `GET /api/compare` (Fase 12a) — reutiliza
     `analysis.comparison.compare_assets` tal cual. Comparación de

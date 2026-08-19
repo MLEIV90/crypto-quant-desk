@@ -3,7 +3,14 @@
  * de qué vista está activa vive en `App.tsx`.
  */
 
-export type ViewKey = "tecnico" | "riesgo" | "backtest" | "research" | "estadistica" | "comparacion";
+export type ViewKey =
+  | "tecnico"
+  | "riesgo"
+  | "backtest"
+  | "research"
+  | "estadistica"
+  | "comparacion"
+  | "arbitraje";
 
 const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "tecnico", label: "Análisis Técnico" },
@@ -12,6 +19,7 @@ const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "research", label: "Research" },
   { key: "estadistica", label: "Estadística" },
   { key: "comparacion", label: "Comparación" },
+  { key: "arbitraje", label: "Arbitraje" },
 ];
 
 interface NavTabsProps {
