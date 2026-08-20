@@ -16,6 +16,10 @@
  * dispara `DataStatusBar` al terminar un refresh (predicate sobre
  * `queryKey.includes(asset)`) también refresca la entrada del watchlist
  * del activo recién actualizado, sin código extra.
+ *
+ * `flashingAssets` (Fase 13c): monedas con una alerta recién disparada
+ * (`AlertsPanel` -> `App.tsx` -> acá) — se resaltan unos segundos para que
+ * se note el disparo aunque el usuario esté mirando otra pestaña/activo.
  */
 
 import { useQueries } from "@tanstack/react-query";
@@ -60,9 +64,10 @@ interface WatchlistPanelProps {
   assets: string[];
   activeAsset: string;
   onSelectAsset: (asset: string) => void;
+  flashingAssets?: Set<string>;
 }
 
-export function WatchlistPanel({ assets, activeAsset, onSelectAsset }: WatchlistPanelProps) {
+export function WatchlistPanel({ assets, activeAsset, onSelectAsset, flashingAssets }: WatchlistPanelProps) {
   const results = useQueries({
     queries: assets.map((asset) => ({
       queryKey: ["watchlist", asset],
@@ -82,12 +87,15 @@ export function WatchlistPanel({ assets, activeAsset, onSelectAsset }: Watchlist
           const result = results[index];
           const entry = result.data;
           const isActive = asset === activeAsset;
+          const isFlashing = flashingAssets?.has(asset) ?? false;
 
           return (
             <button
               key={asset}
               type="button"
-              className={`watchlist-item${isActive ? " watchlist-item--active" : ""}`}
+              className={`watchlist-item${isActive ? " watchlist-item--active" : ""}${
+                isFlashing ? " watchlist-item--flash" : ""
+              }`}
               onClick={() => onSelectAsset(asset)}
               aria-pressed={isActive}
             >

@@ -6,7 +6,7 @@
  * que de verdad se comparte entre vistas.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import "./App.css";
 import { getAssets } from "./api";
@@ -25,6 +25,7 @@ import { CorrelationView } from "./views/CorrelationView";
 
 const DEFAULT_ASSET = "BTC";
 const DEFAULT_INTERVAL = "1d";
+const ALERT_FLASH_DURATION_MS = 4000;
 
 const DISCLAIMER_TEXT =
   "Herramienta de análisis y gestión de riesgo. No es asesoramiento financiero ni predicción de precio.";
@@ -37,6 +38,22 @@ function Dashboard() {
   const [activeView, setActiveView] = useState<ViewKey>("tecnico");
   const [asset, setAsset] = useState(DEFAULT_ASSET);
   const [interval, setInterval] = useState(DEFAULT_INTERVAL);
+  // Qué monedas parpadean en el watchlist por una alerta recién disparada
+  // (Fase 13c) — vive acá (no en TechnicalAnalysisView/AlertsPanel) porque
+  // WatchlistPanel es compartido por TODAS las vistas, no solo Análisis
+  // Técnico. `AlertsPanel` avisa hacia arriba vía `onAlertTriggered`.
+  const [flashingAssets, setFlashingAssets] = useState<Set<string>>(new Set());
+
+  const handleAlertTriggered = useCallback((triggeredAsset: string) => {
+    setFlashingAssets((prev) => new Set(prev).add(triggeredAsset));
+    setTimeout(() => {
+      setFlashingAssets((prev) => {
+        const next = new Set(prev);
+        next.delete(triggeredAsset);
+        return next;
+      });
+    }, ALERT_FLASH_DURATION_MS);
+  }, []);
 
   const assetsQuery = useQuery({ queryKey: ["assets"], queryFn: getAssets });
   const assets = useMemo(() => assetsQuery.data?.activos ?? [asset], [assetsQuery.data, asset]);
@@ -73,13 +90,15 @@ function Dashboard() {
         />
       </header>
 
-      <WatchlistPanel assets={assets} activeAsset={asset} onSelectAsset={setAsset} />
+      <WatchlistPanel assets={assets} activeAsset={asset} onSelectAsset={setAsset} flashingAssets={flashingAssets} />
 
       <DataStatusBar asset={asset} interval={dataStatusInterval} />
 
       <p className="disclaimer">{DISCLAIMER_TEXT}</p>
 
-      {activeView === "tecnico" && <TechnicalAnalysisView asset={asset} interval={interval} />}
+      {activeView === "tecnico" && (
+        <TechnicalAnalysisView asset={asset} interval={interval} assets={assets} onAlertTriggered={handleAlertTriggered} />
+      )}
       {activeView === "riesgo" && <RiskView asset={asset} />}
       {activeView === "backtest" && <BacktestView asset={asset} />}
       {activeView === "research" && <ResearchView asset={asset} />}

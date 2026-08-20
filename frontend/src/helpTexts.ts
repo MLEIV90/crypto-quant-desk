@@ -230,6 +230,17 @@ export const CORRELATION_INTRO_HELP =
   "mueven en sentido opuesto. Las correlaciones NO son fijas — cambian con el tiempo y con el período " +
   "elegido, esto es una foto del rango de arriba, no una constante del mercado.";
 
+// --------------------------------------------------------------------------
+// Panel de alertas (Fase 8d, ampliado en Fase 13c)
+// --------------------------------------------------------------------------
+
+export const ALERTS_HONESTY_HELP =
+  "Estas alertas son TÉCNICAS, no predicen nada: son solo el aviso de que una condición que VOS elegiste " +
+  "(un cruce de precio, un nivel de RSI, tocar el POC, etc.) se cumplió en los datos más recientes. No hay " +
+  "notificaciones push ni por email — solo funcionan con esta página abierta en el navegador. Una regla " +
+  "creada para una moneda distinta a la que estás mirando queda guardada pero no se evalúa hasta que " +
+  "cambies a verla (mirá el badge 'en vivo' de cada regla).";
+
 export const CORRELATION_METHOD_HELP =
   "Pearson mide relación LINEAL: qué tan bien un movimiento se explica como múltiplo constante del otro. " +
   "Spearman mide relación de RANGOS (monótona): si uno sube, ¿el otro tiende a subir también, aunque no " +

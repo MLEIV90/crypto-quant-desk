@@ -14,6 +14,15 @@
  * velas y no se desincronizan entre sí al cambiar de período.
  *
  * Fase 10b: `ChartTypeSelector` (velas / Heikin-Ashi) al lado del período.
+ *
+ * Fase 13c: `AlertsPanel` ahora puede crear reglas para CUALQUIER moneda
+ * (recibe `assets`) y avisa hacia arriba (`onAlertTriggered`) cuándo se
+ * disparó una, para que `App.tsx` resalte esa moneda en el watchlist aunque
+ * el usuario esté mirando otro activo. El volume profile (Fase 13a) ahora
+ * se pide SIEMPRE (no solo con el toggle activo) porque las alertas de
+ * POC/Value Area lo necesitan aunque el overlay esté apagado — es un
+ * cálculo liviano (numpy vectorizado), a diferencia de /api/risk o
+ * /api/prediction, así que no hace falta gatearlo.
  */
 
 import { useCallback, useState } from "react";
@@ -43,9 +52,11 @@ function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
 interface TechnicalAnalysisViewProps {
   asset: string;
   interval: string;
+  assets: string[];
+  onAlertTriggered?: (asset: string) => void;
 }
 
-export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisViewProps) {
+export function TechnicalAnalysisView({ asset, interval, assets, onAlertTriggered }: TechnicalAnalysisViewProps) {
   const [activeOverlays, setActiveOverlays] = useState<Set<OverlayKey>>(new Set(DEFAULT_ACTIVE_OVERLAYS));
   const [activeOscillators, setActiveOscillators] = useState<Set<OscillatorKey>>(
     new Set(DEFAULT_ACTIVE_OSCILLATORS),
@@ -77,14 +88,12 @@ export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisView
     queryKey: ["suggester", asset, interval],
     queryFn: () => getSuggester(asset, interval),
   });
-  // Solo se pide cuando el toggle "Volume Profile" está activo (Fase 13a) —
-  // igual que /api/prediction, sin necesidad real de recalcularlo cuando el
-  // usuario no lo está mirando. Mismo candleLimit que ohlcv/studies para que
-  // el perfil respete el período elegido (PeriodSelector).
+  // Siempre se pide (Fase 13c: antes solo con el toggle activo, ver
+  // docstring del componente) — mismo candleLimit que ohlcv/studies para
+  // que el perfil respete el período elegido (PeriodSelector).
   const volumeProfileQuery = useQuery({
     queryKey: ["volume-profile", asset, interval, candleLimit],
     queryFn: () => getVolumeProfile(asset, interval, candleLimit),
-    enabled: activeOverlays.has("volumeProfile"),
   });
 
   const ohlcv = ohlcvQuery.data;
@@ -143,7 +152,15 @@ export function TechnicalAnalysisView({ asset, interval }: TechnicalAnalysisView
                 )}
               </aside>
             )}
-            <AlertsPanel asset={asset} interval={interval} studies={studies} ohlcv={ohlcv} />
+            <AlertsPanel
+              asset={asset}
+              interval={interval}
+              assets={assets}
+              studies={studies}
+              ohlcv={ohlcv}
+              volumeProfile={volumeProfile ?? null}
+              onAlertTriggered={onAlertTriggered}
+            />
           </div>
         </div>
       )}
