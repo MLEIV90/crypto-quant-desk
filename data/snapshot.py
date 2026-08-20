@@ -25,6 +25,7 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+import requests
 
 from config import SNAPSHOT_DIR, UNIVERSE
 from data import loaders
@@ -143,7 +144,14 @@ def update_snapshot(asset: str, interval: str) -> dict:
     )
     try:
         raw = loaders._load_binance(symbol, interval, last_saved.isoformat(), last_closed.isoformat())
-    except Exception as exc:  # noqa: BLE001 - reclasificamos geobloqueo, el resto se propaga tal cual
+    # F-03 (auditoría, Fase 14): acotado a lo que realmente puede propagar
+    # `_load_binance` — `requests.RequestException` (un fallo HTTP directo,
+    # p. ej. el 451/403 de geobloqueo antes de agotar reintentos),
+    # `ConnectionError` (agotó los reintentos de `loaders._http_get_with_retry`,
+    # con el `RequestException` original encadenado en `__cause__`, que es
+    # justo lo que recorre `is_geoblocked_error`) o `ValueError` (sin velas /
+    # intervalo inválido).
+    except (requests.RequestException, ConnectionError, ValueError) as exc:
         if is_geoblocked_error(exc):
             raise GeoblockedError(
                 f"Binance bloqueó la descarga de '{asset}' por geolocalización (HTTP 451/403) — "

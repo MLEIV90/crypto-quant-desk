@@ -144,7 +144,12 @@ def select_best_model(returns: pd.Series, criterion: str = "aic") -> dict:
     for vol, dist in _GRID:
         try:
             result = fit_garch_variant(returns, vol=vol, dist=dist)
-        except Exception as exc:  # noqa: BLE001 - un modelo que no converge no debe tumbar la selección
+        # F-03 (auditoría, Fase 14): acotado a los modos de falla numérica
+        # documentados del ajuste MLE de `arch` (parámetros inválidos,
+        # matriz de covarianza singular, no convergencia) — mismo criterio
+        # que `models/arima.py`, no un `Exception` amplio que también
+        # trague bugs reales.
+        except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
             logger.warning("select_best_model: '%s'/'%s' no convergió: %s", vol, dist, exc)
             continue
         candidates.append(

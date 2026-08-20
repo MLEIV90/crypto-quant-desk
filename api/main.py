@@ -689,6 +689,7 @@ def refresh_snapshot(asset: str, interval: str = "1d") -> RefreshResponse:
     except GeoblockedError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - cualquier otra falla de red/HTTP, mensaje claro al frontend
+        logger.error("refresh_snapshot(%s, %s): falló la actualización desde Binance: %s", asset, interval, exc)
         raise HTTPException(status_code=502, detail=f"No se pudo actualizar '{asset}' desde Binance: {exc}") from exc
 
     return RefreshResponse(

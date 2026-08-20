@@ -72,7 +72,11 @@ def select_arima_order(
             order = (p, 0, q)
             try:
                 result = _fit_arima_order(clean_returns, order)
-            except Exception as exc:  # noqa: BLE001 - un order que no converge se descarta, no rompe la grilla
+            # F-03 (auditoría, Fase 14): acotado a los modos de falla
+            # numérica documentados de la optimización MLE de statsmodels/
+            # scipy (parámetros inválidos, matriz singular, no convergencia)
+            # — no un `Exception` amplio que también trague bugs reales.
+            except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
                 logger.debug("select_arima_order: order=%s no convergió: %s", order, exc)
                 continue
             candidates.append({"order": order, "aic": float(result.aic), "bic": float(result.bic)})
@@ -215,7 +219,9 @@ def walk_forward_directional_accuracy(
                 steps_since_refit += 1
 
                 predicted_mean = float(current_result.get_forecast(steps=1).predicted_mean.iloc[-1])
-        except Exception as exc:  # noqa: BLE001 - un paso que no converge se descarta, no rompe el backtest
+        # F-03 (auditoría, Fase 14): mismos modos de falla numérica acotados
+        # que en `select_arima_order` — ver su comentario.
+        except (ValueError, RuntimeError, np.linalg.LinAlgError) as exc:
             logger.warning("walk_forward_directional_accuracy: falló el paso i=%d: %s", i, exc)
             current_result = None  # fuerza un refit limpio en el próximo paso
             continue

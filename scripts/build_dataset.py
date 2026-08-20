@@ -67,13 +67,13 @@ def main() -> None:
                 use_cache=use_cache,
             )
             logger.info("%s: %d filas descargadas/cacheadas desde '%s'", asset, len(df), args.source)
-        except Exception:
+        except Exception:  # noqa: BLE001 - falla de red/fuente de un activo no debe tumbar el resto del universo
             logger.exception("Falló la descarga de %s", asset)
 
         if not args.skip_verification_csv:
             try:
                 _export_verification_csv(asset, args.start, args.end)
-            except Exception:
+            except Exception:  # noqa: BLE001 - idem: loguear y seguir con el resto del universo
                 logger.exception("Falló la exportación del CSV de verificación de %s", asset)
 
 

@@ -36,9 +36,19 @@
  * (`createPriceLine`, mismo mecanismo que Fibonacci/soporte-resistencia)
  * para quedar resaltado con su propia etiqueta en el eje — solo las BARRAS
  * del histograma y el sombreado del Value Area van al canvas.
+ *
+ * `disableDownsample` (Fase 14, hallazgo F-04): por encima de
+ * `../downsample.ts::DOWNSAMPLE_THRESHOLD` velas (el caso real es "Todo" +
+ * horario, ~58.000 velas — ver `PeriodSelector`), este componente
+ * submuestrea SOLO lo que dibuja (velas, overlays, osciladores) — nunca
+ * `studies`/`ohlcv` en sí, que siguen intactos para quien más los use
+ * (`AlertsPanel`, `DrawingTools`). Es puramente una salvaguarda de
+ * renderizado; `disableDownsample=true` la apaga y dibuja todo a
+ * resolución completa (más lento con datasets grandes, a propósito
+ * configurable en vez de forzado).
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   AreaSeries,
   CandlestickSeries,
@@ -50,11 +60,12 @@ import {
   LineStyle,
 } from "lightweight-charts";
 import type { IChartApi, IPaneApi, ISeriesApi, SeriesType, Time, UTCTimestamp } from "lightweight-charts";
-import type { OHLCVResponse, StudiesResponse, VolumeProfileResponse } from "../types";
+import type { Candle, OHLCVResponse, StudiesResponse, VolumeProfileResponse } from "../types";
 import type { ChartTypeKey } from "./ChartTypeSelector";
 import type { OverlayKey } from "./StudyToggles";
 import type { OscillatorKey } from "./OscillatorPanel";
 import { toHeikinAshi } from "../heikinAshi";
+import { computeDownsampleStep, downsampleByStep } from "../downsample";
 import { COLORS } from "../theme";
 
 interface ChartProps {
@@ -64,6 +75,7 @@ interface ChartProps {
   activeOscillators: Set<OscillatorKey>;
   chartType: ChartTypeKey;
   volumeProfile?: VolumeProfileResponse | null;
+  disableDownsample?: boolean;
   onChartReady?: (chart: IChartApi | null, candleSeries: ISeriesApi<"Candlestick", Time> | null) => void;
 }
 
@@ -93,6 +105,39 @@ function toLineData(fechas: string[], values: (number | null)[]): { time: UTCTim
     }
   });
   return points;
+}
+
+/** Submuestrea TODOS los campos de serie temporal de `studies` con el mismo
+ * `step` (Fase 14, F-04) — así overlays/osciladores quedan alineados entre
+ * sí y con las velas downsampleadas, sin tocar el objeto `studies` original
+ * (`step<=1` devuelve `studies` tal cual, sin copiar).
+ */
+function downsampleStudiesForChart(studies: StudiesResponse, step: number): StudiesResponse {
+  if (step <= 1) return studies;
+  return {
+    ...studies,
+    fechas: downsampleByStep(studies.fechas, step),
+    sma_20: downsampleByStep(studies.sma_20, step),
+    sma_50: downsampleByStep(studies.sma_50, step),
+    ema_12: downsampleByStep(studies.ema_12, step),
+    ema_26: downsampleByStep(studies.ema_26, step),
+    bb_upper: downsampleByStep(studies.bb_upper, step),
+    bb_mid: downsampleByStep(studies.bb_mid, step),
+    bb_lower: downsampleByStep(studies.bb_lower, step),
+    rsi_14: downsampleByStep(studies.rsi_14, step),
+    macd: downsampleByStep(studies.macd, step),
+    macd_signal: downsampleByStep(studies.macd_signal, step),
+    macd_hist: downsampleByStep(studies.macd_hist, step),
+    stoch_k: downsampleByStep(studies.stoch_k, step),
+    stoch_d: downsampleByStep(studies.stoch_d, step),
+    vwap: downsampleByStep(studies.vwap, step),
+    obv: downsampleByStep(studies.obv, step),
+    ichimoku_tenkan: downsampleByStep(studies.ichimoku_tenkan, step),
+    ichimoku_kijun: downsampleByStep(studies.ichimoku_kijun, step),
+    ichimoku_senkou_a: downsampleByStep(studies.ichimoku_senkou_a, step),
+    ichimoku_senkou_b: downsampleByStep(studies.ichimoku_senkou_b, step),
+    ichimoku_chikou: downsampleByStep(studies.ichimoku_chikou, step),
+  };
 }
 
 const REFERENCE_LINE_STYLE = { color: COLORS.textMuted, lineWidth: 1 as const, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" };
@@ -390,8 +435,18 @@ export function Chart({
   activeOscillators,
   chartType,
   volumeProfile = null,
+  disableDownsample = false,
   onChartReady,
 }: ChartProps) {
+  // Downsampling VISUAL (Fase 14, F-04) — ver `../downsample.ts` y el
+  // docstring de `disableDownsample` más arriba. `chartStudies` se
+  // memoiza para que las dependencias de los efectos de abajo (overlays/
+  // osciladores) no se disparen en CADA render por una referencia nueva.
+  const downsampleStep = disableDownsample ? 1 : computeDownsampleStep(ohlcv.velas.length);
+  const isDownsampled = downsampleStep > 1;
+  const plottedCandleCount = isDownsampled ? downsampleByStep(ohlcv.velas, downsampleStep).length : ohlcv.velas.length;
+  const chartStudies = useMemo(() => downsampleStudiesForChart(studies, downsampleStep), [studies, downsampleStep]);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
@@ -447,10 +502,17 @@ export function Chart({
   // gráfico. Heikin-Ashi (Fase 10b) transforma el OHLC ACÁ, justo antes de
   // graficarlo — overlays/osciladores (más abajo) nunca ven estos valores
   // transformados, siguen leyendo el precio real de `studies`.
+  //
+  // Downsampling (Fase 14, F-04): SIEMPRE después de Heikin-Ashi, nunca
+  // antes — HA es una transformación recursiva (cada vela depende de la
+  // anterior YA transformada), saltear velas antes de calcularla daría
+  // velas Heikin-Ashi distintas a las reales. `ohlcv`/`studies` (props)
+  // nunca se tocan acá, solo el array local que se le pasa a `setData()`.
   useEffect(() => {
     const candleSeries = candleSeriesRef.current;
     if (!candleSeries) return;
-    const candles = chartType === "heikin-ashi" ? toHeikinAshi(ohlcv.velas) : ohlcv.velas;
+    const fullCandles: Candle[] = chartType === "heikin-ashi" ? toHeikinAshi(ohlcv.velas) : ohlcv.velas;
+    const candles = downsampleByStep(fullCandles, downsampleStep);
     candleSeries.setData(
       candles.map((vela) => ({
         time: toTimestamp(vela.fecha),
@@ -461,7 +523,7 @@ export function Chart({
       })),
     );
     chartRef.current?.timeScale().fitContent();
-  }, [ohlcv, chartType]);
+  }, [ohlcv, chartType, downsampleStep]);
 
   // Overlays: se reconstruyen ENTEROS cuando cambia qué overlays están
   // activos o cuando cambian los datos de estudios (nuevo activo/
@@ -480,7 +542,7 @@ export function Chart({
       // genérica, tiene su propio efecto de canvas más abajo (ver
       // `drawVolumeProfile`).
       if (key === "volumeProfile") return;
-      overlayArtifactsRef.current.set(key, createOverlay(chart, candleSeries, key, studies));
+      overlayArtifactsRef.current.set(key, createOverlay(chart, candleSeries, key, chartStudies));
     });
     // `fitContent()` también acá (no solo en el efecto de velas de arriba):
     // `/api/studies` tarda más que `/api/ohlcv` (calcula bastante más sobre
@@ -493,7 +555,7 @@ export function Chart({
     // ya con los overlays al día, corrige ese caso sin tener que
     // sincronizar a mano cuándo termina cada query.
     chart.timeScale().fitContent();
-  }, [activeOverlays, studies]);
+  }, [activeOverlays, chartStudies]);
 
   // Osciladores: mismo criterio (reconstrucción completa) que los overlays,
   // mismo re-fit al final y por la misma razón (paneles propios, pero
@@ -505,10 +567,10 @@ export function Chart({
     oscillatorArtifactsRef.current.forEach((artifact) => removeOscillator(chart, artifact));
     oscillatorArtifactsRef.current.clear();
     activeOscillators.forEach((key) => {
-      oscillatorArtifactsRef.current.set(key, createOscillator(chart, key, studies));
+      oscillatorArtifactsRef.current.set(key, createOscillator(chart, key, chartStudies));
     });
     chart.timeScale().fitContent();
-  }, [activeOscillators, studies]);
+  }, [activeOscillators, chartStudies]);
 
   // Volume Profile (Fase 13a): la línea del POC es una price line NATIVA
   // (se crea/destruye una sola vez por cambio de datos, igual que
@@ -558,6 +620,14 @@ export function Chart({
     <div className="chart-container-wrapper">
       <div ref={containerRef} className="chart-container" />
       <canvas ref={volumeProfileCanvasRef} className="volume-profile-canvas" />
+      {isDownsampled && (
+        <div
+          className="chart-downsample-badge"
+          title="Se muestra 1 de cada varias velas para que el dibujo no vaya lento — los cálculos (estudios, riesgo, alertas) siguen usando TODAS las velas reales, esto es solo la vista."
+        >
+          Vista optimizada — {plottedCandleCount.toLocaleString("es-AR")} de {ohlcv.velas.length.toLocaleString("es-AR")} velas
+        </div>
+      )}
     </div>
   );
 }

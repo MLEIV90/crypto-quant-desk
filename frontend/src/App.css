@@ -611,6 +611,22 @@
   z-index: 5;
 }
 
+/* Downsampling visual (Fase 14, F-04): aviso sutil en la esquina, para no
+   engañar sobre cuántas velas se están dibujando realmente. */
+.chart-downsample-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 6;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-faint);
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  pointer-events: none;
+}
+
 /* ---------------------------------------------------------------------
    Herramientas de dibujo sobre el gráfico (Fase 8d)
    --------------------------------------------------------------------- */

@@ -5,6 +5,14 @@ función orquestadora `asset -> dict` que arma sus propias features/labels
 desde cero, se testea contra el snapshot local real (`source="store"`),
 igual que ya hace `tests/test_app_smoke.py` para `BacktestWorker` — no hay
 red de por medio, solo lectura de los parquet ya exportados.
+
+`BTC_onchain_1d.parquet` (`config.SNAPSHOT_DIR`) NO está versionado (ver
+`.gitignore` y `scripts/export_onchain.py`) — a diferencia del snapshot de
+precios "normal", que se comparte manualmente, el on-chain se genera aparte
+y no siempre está presente (p. ej. en un clon limpio). El test que depende
+de él (`test_evaluate_with_without_onchain_returns_expected_keys_on_real_btc_data`)
+se OMITE (`pytest.skip`) en vez de fallar cuando ese archivo no existe — ver
+Fase 14 / hallazgo F-01 de auditoría.
 """
 
 from __future__ import annotations
@@ -13,6 +21,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from config import SNAPSHOT_DIR
 from ml.models import (
     evaluate_primary,
     evaluate_with_without_onchain,
@@ -244,6 +253,12 @@ def test_latest_oos_prediction_returns_expected_structure() -> None:
 
 
 def test_evaluate_with_without_onchain_returns_expected_keys_on_real_btc_data() -> None:
+    # F-01 (auditoría, Fase 14): BTC_onchain_1d.parquet no está versionado
+    # — sin él, este test se omite con un mensaje claro en vez de fallar
+    # (p. ej. en un clon limpio que no corrió scripts/export_onchain.py).
+    if not (SNAPSHOT_DIR / "BTC_onchain_1d.parquet").exists():
+        pytest.skip("snapshot on-chain ausente (data/snapshot/BTC_onchain_1d.parquet); correr scripts/export_onchain.py")
+
     # n_splits chico a propósito: solo se busca validar la ESTRUCTURA del
     # resultado y que corre de punta a punta sobre datos reales, no medir
     # con precisión el desempeño (eso se corre aparte, con n_splits=5, para

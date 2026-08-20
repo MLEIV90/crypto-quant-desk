@@ -23,6 +23,11 @@
  * POC/Value Area lo necesitan aunque el overlay esté apagado — es un
  * cálculo liviano (numpy vectorizado), a diferencia de /api/risk o
  * /api/prediction, así que no hace falta gatearlo.
+ *
+ * Fase 14 (F-04): con "Todo" + horario (~58.000 velas), `Chart` submuestrea
+ * el DIBUJO por defecto (ver `../downsample.ts`). El checkbox "Vista
+ * completa" de acá abajo (solo visible por encima del umbral) lo desactiva
+ * para quien prefiera resolución total a costa de más lag de render.
  */
 
 import { useCallback, useState } from "react";
@@ -33,6 +38,7 @@ import { AlertsPanel } from "../components/AlertsPanel";
 import { Chart } from "../components/Chart";
 import { ChartTypeSelector, DEFAULT_CHART_TYPE, type ChartTypeKey } from "../components/ChartTypeSelector";
 import { DrawingTools } from "../components/DrawingTools";
+import { DOWNSAMPLE_THRESHOLD } from "../downsample";
 import { DEFAULT_ACTIVE_OSCILLATORS, OscillatorPanel, type OscillatorKey } from "../components/OscillatorPanel";
 import { candleLimitForPeriod, DEFAULT_PERIOD, PeriodSelector, type PeriodKey } from "../components/PeriodSelector";
 import { DEFAULT_ACTIVE_OVERLAYS, StudyToggles, type OverlayKey } from "../components/StudyToggles";
@@ -64,6 +70,7 @@ export function TechnicalAnalysisView({ asset, interval, assets, onAlertTriggere
   const [period, setPeriod] = useState<PeriodKey>(DEFAULT_PERIOD);
   const candleLimit = candleLimitForPeriod(period, interval);
   const [chartType, setChartType] = useState<ChartTypeKey>(DEFAULT_CHART_TYPE);
+  const [disableDownsample, setDisableDownsample] = useState(false);
   const [chartApi, setChartApi] = useState<{
     chart: IChartApi;
     series: ISeriesApi<"Candlestick", Time>;
@@ -124,6 +131,16 @@ export function TechnicalAnalysisView({ asset, interval, assets, onAlertTriggere
             <div className="chart-controls-row">
               <ChartTypeSelector active={chartType} onChange={setChartType} />
               <PeriodSelector active={period} onChange={setPeriod} />
+              {ohlcv.velas.length > DOWNSAMPLE_THRESHOLD && (
+                <label className="toggle-chip">
+                  <input
+                    type="checkbox"
+                    checked={disableDownsample}
+                    onChange={(event) => setDisableDownsample(event.target.checked)}
+                  />
+                  Vista completa ({ohlcv.velas.length.toLocaleString("es-AR")} velas, más lento)
+                </label>
+              )}
             </div>
             <DrawingTools
               asset={asset}
@@ -138,6 +155,7 @@ export function TechnicalAnalysisView({ asset, interval, assets, onAlertTriggere
               activeOscillators={activeOscillators}
               chartType={chartType}
               volumeProfile={volumeProfile ?? null}
+              disableDownsample={disableDownsample}
               onChartReady={handleChartReady}
             />
           </div>
