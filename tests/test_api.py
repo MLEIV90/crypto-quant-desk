@@ -751,6 +751,42 @@ def test_get_pairs_detail_returns_cointegration_spread_and_zscore() -> None:
     else:
         assert body["estabilidad_mensaje"] is not None
 
+    # Fase 15b: extremos de z-score, todos con |z| >= 2.
+    for extremo in body["zscore_extremos"]:
+        assert abs(extremo["z"]) >= 2.0
+
+    # Fase 15b: backtest del par.
+    backtest = body["backtest"]
+    assert len(backtest["fechas"]) == len(backtest["equity_curve"])
+    assert len(backtest["fechas"]) > 0
+    assert backtest["equity_curve"][0] == pytest.approx(1.0)
+    expected_metric_keys = {
+        "total_return", "cagr", "ann_vol", "sharpe", "sortino", "max_drawdown", "calmar",
+        "turnover_total", "turnover_medio_diario", "n_trades", "exposicion_media", "hit_rate",
+    }
+    assert set(backtest["metrics"].keys()) == expected_metric_keys
+
+
+def test_get_pairs_detail_backtest_params_change_the_result() -> None:
+    default_response = client.get("/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC"})
+    strict_response = client.get(
+        "/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "bt_entry": 10.0, "bt_stop": 20.0}
+    )
+
+    assert default_response.status_code == 200
+    assert strict_response.status_code == 200
+    # con un umbral de entrada inalcanzable, el backtest no debería operar.
+    assert strict_response.json()["backtest"]["metrics"]["n_trades"] == 0
+
+
+def test_get_pairs_detail_invalid_backtest_params_returns_400() -> None:
+    # exit < entry < stop no se cumple (entry=10 > stop=3, el default) -> 400, no 500.
+    response = client.get(
+        "/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "bt_entry": 10.0}
+    )
+
+    assert response.status_code == 400
+
 
 def test_get_pairs_detail_same_asset_returns_400() -> None:
     response = client.get("/api/pairs/detail", params={"asset_y": "BTC", "asset_x": "BTC"})

@@ -65,10 +65,13 @@ from api.models import (
     MarketPhase,
     MonthlyYearlyHeatmap,
     OHLCVResponse,
+    PairBacktestMetrics,
+    PairBacktestResult,
     PairDetailResponse,
     PairScreeningResponse,
     PairScreeningRow,
     PairStabilitySummary,
+    PairZscoreExtreme,
     PredictionResponse,
     RefreshResponse,
     RiskResponse,
@@ -79,7 +82,7 @@ from api.models import (
     VolumeProfileResponse,
 )
 from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
-from config import UNIVERSE
+from config import TRANSACTION_COST_BPS, UNIVERSE
 from data.loaders import get_prices
 from data.snapshot import GeoblockedError, last_closed_candle_open_time, update_snapshot
 from eda.eda_report import adf_test, correlation_matrix
@@ -88,6 +91,7 @@ from ml.features import align_features_labels, build_feature_matrix
 from ml.labeling import get_daily_volatility, triple_barrier_labels
 from ml.models import evaluate_primary_with_roc_auc, feature_importances, fit_final, latest_oos_prediction, t1_from_labels
 from models.garch import conditional_volatility, select_best_model, volatility_regime
+from pairs.backtest import DEFAULT_PAIR_ENTRY, DEFAULT_PAIR_EXIT, DEFAULT_PAIR_STOP, backtest_pair
 from pairs.cointegration import engle_granger, half_life
 from pairs.signals import zscore
 from pairs.stability import rolling_cointegration, screen_pairs_stability, stability_summary
@@ -934,22 +938,35 @@ def get_pairs_screening(interval: str = "1d") -> PairScreeningResponse:
 @router.get(
     "/pairs/detail",
     response_model=PairDetailResponse,
-    summary="Detalle de un par: cointegración, spread, z-score y estabilidad rolling",
+    summary="Detalle de un par: cointegración, spread, z-score, estabilidad rolling y backtest",
 )
-def get_pairs_detail(asset_y: str, asset_x: str, interval: str = "1d") -> PairDetailResponse:
-    """Reutiliza `pairs.cointegration.engle_granger`/`half_life` y
-    `pairs.stability.rolling_cointegration`/`stability_summary` tal cual (NO
-    reimplementa nada de `pairs/`) sobre precios cargados vía `_load_df`
-    (mismo punto de entrada que el resto de la API, respeta `interval`
-    de verdad — a diferencia de `/api/pairs/screening`, acá SÍ se puede
-    pedir `interval="1h"`).
+def get_pairs_detail(
+    asset_y: str,
+    asset_x: str,
+    interval: str = "1d",
+    bt_entry: float = DEFAULT_PAIR_ENTRY,
+    bt_exit: float = DEFAULT_PAIR_EXIT,
+    bt_stop: float = DEFAULT_PAIR_STOP,
+    bt_cost_bps: float = TRANSACTION_COST_BPS,
+) -> PairDetailResponse:
+    """Reutiliza `pairs.cointegration.engle_granger`/`half_life`,
+    `pairs.stability.rolling_cointegration`/`stability_summary` y (Fase 15b)
+    `pairs.backtest.backtest_pair` tal cual (NO reimplementa nada de
+    `pairs/`) sobre precios cargados vía `_load_df` (mismo punto de entrada
+    que el resto de la API, respeta `interval` de verdad — a diferencia de
+    `/api/pairs/screening`, acá SÍ se puede pedir `interval="1h"`).
 
     Si no hay historia suficiente para ni una ventana rolling completa
     (`pairs.stability.rolling_cointegration` pide 365 observaciones por
     defecto — con `interval="1h"` puede no alcanzar), `estabilidad` viaja en
     `null` con el motivo en `estabilidad_mensaje`, en vez de fallar el
     endpoint entero: el resto del análisis (cointegración in-sample, spread,
-    z-score) sigue siendo válido igual.
+    z-score, backtest) sigue siendo válido igual.
+
+    `bt_entry`/`bt_exit`/`bt_stop`/`bt_cost_bps` (Fase 15b): parámetros del
+    backtest de `pairs.backtest.backtest_pair` — opcionales, con los mismos
+    defaults que esa función (ver su docstring, incluida la nota de por qué
+    `bt_exit` default es 0.5 y no 0.0).
     """
     _validate_asset(asset_y)
     _validate_asset(asset_x)
@@ -966,6 +983,12 @@ def get_pairs_detail(asset_y: str, asset_x: str, interval: str = "1d") -> PairDe
     z = zscore(spread)
     z_actual = _none_if_nan(float(z.iloc[-1])) if len(z) else None
 
+    zscore_extremos = [
+        PairZscoreExtreme(fecha=fecha.to_pydatetime(), z=float(value))
+        for fecha, value in z.items()
+        if pd.notna(value) and abs(value) >= _ZSCORE_EXTREME_THRESHOLD
+    ]
+
     try:
         rolling = rolling_cointegration(y, x)
         summary = stability_summary(rolling)
@@ -974,6 +997,21 @@ def get_pairs_detail(asset_y: str, asset_x: str, interval: str = "1d") -> PairDe
     except ValueError as exc:
         estabilidad = None
         estabilidad_mensaje = f"No se pudo evaluar estabilidad rolling: {exc}"
+
+    try:
+        bt = backtest_pair(
+            y, x, hedge_ratio=eg["beta"], entry=bt_entry, exit=bt_exit, stop=bt_stop, cost_bps=bt_cost_bps
+        )
+    except ValueError as exc:
+        # p. ej. bt_entry/bt_exit/bt_stop no cumplen 0 <= exit < entry < stop
+        # (ver pairs.signals.generate_pair_signals) — error del USUARIO vía
+        # query params, no una falla del servidor.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    backtest = PairBacktestResult(
+        fechas=_dates_to_list(bt["equity_curve"].index),
+        equity_curve=[float(v) for v in bt["equity_curve"].to_numpy()],
+        metrics=PairBacktestMetrics(**bt["metrics"]),
+    )
 
     return PairDetailResponse(
         asset_y=asset_y,
@@ -990,8 +1028,10 @@ def get_pairs_detail(asset_y: str, asset_x: str, interval: str = "1d") -> PairDe
         zscore=_series_to_list(z),
         zscore_actual=z_actual,
         zscore_interpretacion=_interpret_zscore(z_actual),
+        zscore_extremos=zscore_extremos,
         estabilidad=estabilidad,
         estabilidad_mensaje=estabilidad_mensaje,
+        backtest=backtest,
     )
 
 

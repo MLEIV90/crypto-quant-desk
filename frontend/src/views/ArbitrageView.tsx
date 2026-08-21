@@ -1,36 +1,48 @@
 /**
- * Vista "Arbitraje" (Fase 12b) — consume `/api/pairs/screening` y
- * `/api/pairs/detail` (sobre `pairs.cointegration`/`pairs.stability`/
- * `pairs.signals`, reutilizados tal cual, ver `api/main.py`).
+ * Vista "Arbitraje" (Fase 12b, completada en Fase 15b) — consume
+ * `/api/pairs/screening` y `/api/pairs/detail` (sobre
+ * `pairs.cointegration`/`pairs.stability`/`pairs.signals`/`pairs.backtest`,
+ * reutilizados tal cual, ver `api/main.py`), más `/api/ohlcv` (Fase 8a,
+ * reutilizado) para el scatter.
  *
  * ENCUADRE HONESTO: esto es arbitraje ESTADÍSTICO (pairs trading), NO
  * arbitraje entre exchanges — ver `ARBITRAGE_INTRO_HELP`. La Fase 2 de este
  * proyecto ya mostró que la mayoría de los pares de `config.UNIVERSE` NO
  * están establemente cointegrados; esta vista expone ese resultado tal
- * cual, con su veredicto rojo/verde, en vez de esconderlo.
+ * cual, con su veredicto rojo/verde, en vez de esconderlo. El backtest del
+ * par (Fase 15b) lo CONFIRMA cuantitativamente en vez de solo describirlo.
  *
  * El screening (tabla de arriba) siempre es DIARIO — `pairs.stability.screen_pairs_stability`
  * no soporta otro intervalo (ver `api/main.py::get_pairs_screening`) — así
  * que ahí no se usa el `interval` compartido del header. El detalle de un
- * par sí lo respeta de verdad.
+ * par (spread/z-score/scatter/backtest) sí lo respeta de verdad.
  */
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, getPairsDetail, getPairsScreening } from "../api";
+import { ApiError, getOhlcv, getPairsDetail, getPairsScreening } from "../api";
 import { InfoTooltip } from "../components/InfoTooltip";
-import { LineChartPanel, type ReferenceLineSpec } from "../components/LineChartPanel";
+import { LineChartPanel, type LineSeriesMarkerSpec, type ReferenceLineSpec } from "../components/LineChartPanel";
 import { MetricCard } from "../components/MetricCard";
+import { ScatterChart, type ScatterPoint } from "../components/ScatterChart";
 import { StatusMessage } from "../components/StatusMessage";
 import {
   ARBITRAGE_CONCEPTS_HELP,
   ARBITRAGE_INTRO_HELP,
   ARBITRAGE_NOT_OPERABLE_WARNING,
+  ARBITRAGE_PAIR_BACKTEST_HELP,
+  ARBITRAGE_PAIR_BACKTEST_NOT_OPERABLE_WARNING,
+  ARBITRAGE_SCATTER_HELP,
   ARBITRAGE_SCREENING_HELP,
+  ARBITRAGE_ZSCORE_EXTREMES_HELP,
 } from "../helpTexts";
 import { COLORS } from "../theme";
 
 const SCREENING_INTERVAL = "1d";
+// Sin límite real de período en /api/pairs/detail (usa TODO el histórico
+// disponible) — se pide el mismo volumen para el scatter, así los puntos
+// son EXACTAMENTE los que ajustaron la recta de regresión (beta/alpha).
+const SCATTER_CANDLE_LIMIT = 60_000;
 
 const ZSCORE_REFERENCE_LINES: ReferenceLineSpec[] = [
   { price: 2, label: "+2", color: COLORS.danger },
@@ -40,6 +52,11 @@ const ZSCORE_REFERENCE_LINES: ReferenceLineSpec[] = [
 
 function formatPercent(fraction: number): string {
   return `${(fraction * 100).toFixed(0)}%`;
+}
+
+function formatScaledPercent(value: number): string {
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}${(value * 100).toFixed(1)}%`;
 }
 
 function formatHalfLife(dias: number | null, interval: string): string {
@@ -68,6 +85,20 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
     enabled: assetY !== assetX,
   });
 
+  // Para el scatter (Fase 15b): mismos activos/intervalo que el detalle,
+  // TODO el histórico (ver SCATTER_CANDLE_LIMIT) para que los puntos sean
+  // los mismos que ajustaron beta/alpha en el backend.
+  const ohlcvYQuery = useQuery({
+    queryKey: ["ohlcv", assetY, interval, SCATTER_CANDLE_LIMIT],
+    queryFn: () => getOhlcv(assetY, interval, SCATTER_CANDLE_LIMIT),
+    enabled: assetY !== assetX,
+  });
+  const ohlcvXQuery = useQuery({
+    queryKey: ["ohlcv", assetX, interval, SCATTER_CANDLE_LIMIT],
+    queryFn: () => getOhlcv(assetX, interval, SCATTER_CANDLE_LIMIT),
+    enabled: assetY !== assetX,
+  });
+
   const screening = screeningQuery.data;
   const screeningError = screeningQuery.error;
   const screeningErrorMessage =
@@ -78,6 +109,16 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
   const detailErrorMessage =
     detailError instanceof ApiError ? detailError.message : detailError ? String(detailError) : null;
 
+  const zscoreMarkers = useMemo((): LineSeriesMarkerSpec[] => {
+    if (!detail) return [];
+    return detail.zscore_extremos.map((extremo) => ({
+      time: extremo.fecha,
+      price: extremo.z,
+      color: extremo.z > 0 ? COLORS.danger : COLORS.accent,
+      shape: extremo.z > 0 ? "arrowUp" : "arrowDown",
+    }));
+  }, [detail]);
+
   const zscoreSeries = useMemo(() => {
     if (!detail) return [];
     return [
@@ -86,9 +127,38 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
         label: `z-score(${detail.asset_y}~${detail.asset_x})`,
         color: COLORS.accent,
         data: detail.fechas.map((fecha, i) => ({ time: fecha, value: detail.zscore[i] ?? null })),
+        markers: zscoreMarkers,
+      },
+    ];
+  }, [detail, zscoreMarkers]);
+
+  const backtestEquitySeries = useMemo(() => {
+    if (!detail) return [];
+    return [
+      {
+        id: "equity",
+        label: "Equity (base 1.0)",
+        color: COLORS.accent,
+        data: detail.backtest.fechas.map((fecha, i) => ({ time: fecha, value: detail.backtest.equity_curve[i] ?? null })),
       },
     ];
   }, [detail]);
+
+  const scatterPoints = useMemo((): ScatterPoint[] => {
+    const yData = ohlcvYQuery.data;
+    const xData = ohlcvXQuery.data;
+    if (!yData || !xData) return [];
+
+    const xByDate = new Map(xData.velas.map((vela) => [vela.fecha, vela.close]));
+    const points: ScatterPoint[] = [];
+    for (const vela of yData.velas) {
+      const xClose = xByDate.get(vela.fecha);
+      if (xClose !== undefined && xClose > 0 && vela.close > 0) {
+        points.push({ x: Math.log(xClose), y: Math.log(vela.close) });
+      }
+    }
+    return points;
+  }, [ohlcvYQuery.data, ohlcvXQuery.data]);
 
   function handleAssetYChange(next: string) {
     setAssetY(next);
@@ -243,11 +313,58 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
             Spread (z-score) con bandas ±2 / 0
             <InfoTooltip text={ARBITRAGE_CONCEPTS_HELP.spread} />
           </h3>
+          <p className="view-note">
+            Las flechas marcan los extremos históricos (|z| ≥ 2): rojas hacia arriba (spread muy estirado hacia
+            arriba), celestes hacia abajo (muy estirado hacia abajo).
+            <InfoTooltip text={ARBITRAGE_ZSCORE_EXTREMES_HELP} placement="bottom" />
+          </p>
           <LineChartPanel series={zscoreSeries} height={320} referenceLines={ZSCORE_REFERENCE_LINES} />
 
           {detail.estabilidad_mensaje && (
             <p className="view-note">{detail.estabilidad_mensaje}</p>
           )}
+
+          <h3 className="panel-subtitle">
+            Dispersión y recta de regresión
+            <InfoTooltip text={ARBITRAGE_SCATTER_HELP} />
+          </h3>
+          {ohlcvYQuery.isLoading || ohlcvXQuery.isLoading ? (
+            <StatusMessage kind="loading">Cargando precios para el scatter…</StatusMessage>
+          ) : (
+            <ScatterChart
+              points={scatterPoints}
+              alpha={detail.alpha}
+              beta={detail.beta}
+              xLabel={`log(precio ${detail.asset_x})`}
+              yLabel={`log(precio ${detail.asset_y})`}
+              height={340}
+            />
+          )}
+
+          <h3 className="panel-subtitle">
+            Backtest del par
+            <InfoTooltip text={ARBITRAGE_PAIR_BACKTEST_HELP} />
+          </h3>
+          {noEstable && <div className="honesty-banner">{ARBITRAGE_PAIR_BACKTEST_NOT_OPERABLE_WARNING}</div>}
+          <div className="metric-grid">
+            <MetricCard
+              label="Retorno total"
+              value={formatScaledPercent(detail.backtest.metrics.total_return)}
+              valueColor={detail.backtest.metrics.total_return >= 0 ? COLORS.success : COLORS.danger}
+            />
+            <MetricCard
+              label="Sharpe"
+              value={detail.backtest.metrics.sharpe.toFixed(2)}
+              valueColor={detail.backtest.metrics.sharpe >= 0 ? COLORS.success : COLORS.danger}
+            />
+            <MetricCard
+              label="Máximo drawdown"
+              value={formatScaledPercent(detail.backtest.metrics.max_drawdown)}
+              valueColor={COLORS.danger}
+            />
+            <MetricCard label="Cantidad de operaciones" value={detail.backtest.metrics.n_trades} />
+          </div>
+          <LineChartPanel series={backtestEquitySeries} height={280} />
         </>
       )}
     </section>

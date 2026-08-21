@@ -376,12 +376,56 @@ class PairStabilitySummary(BaseModel):
     estable: bool
 
 
+class PairZscoreExtreme(BaseModel):
+    """Un punto donde `|z| >= 2` (Fase 15b) — para marcar visualmente los
+    extremos históricos del spread en el gráfico del frontend.
+    """
+
+    fecha: datetime
+    z: float
+
+
+class PairBacktestMetrics(BaseModel):
+    """Métricas de `backtest.engine.run_backtest` sobre el spread (Fase 15b), tal cual."""
+
+    total_return: float
+    cagr: float
+    ann_vol: float
+    sharpe: float
+    sortino: float
+    max_drawdown: float
+    calmar: float
+    turnover_total: float
+    turnover_medio_diario: float
+    n_trades: int
+    exposicion_media: float
+    hit_rate: float
+
+
+class PairBacktestResult(BaseModel):
+    """Resultado de `pairs.backtest.backtest_pair` (Fase 15b) — la estrategia
+    de reversión sobre ESTE par, con sus supuestos (dollar-neutral,
+    rebalanceo diario, retornos simples — ver el docstring de
+    `pairs/backtest.py`) documentados ahí, no acá.
+
+    HONESTIDAD: este backtest existe para PONER A PRUEBA si el par es
+    operable, no para recomendar operarlo — sobre un par no establemente
+    cointegrado, lo esperable es que muestre pérdidas o resultados
+    inestables (ver el texto de la vista "Arbitraje" del frontend).
+    """
+
+    fechas: list[datetime]
+    equity_curve: list[float] = Field(description="Base 1.0, ver backtest.engine.run_backtest")
+    metrics: PairBacktestMetrics
+
+
 class PairDetailResponse(BaseModel):
-    """Respuesta de `GET /api/pairs/detail` (Fase 12b) — análisis completo
-    de UN par vía `pairs.cointegration.engle_granger`/`half_life` y
-    `pairs.stability.rolling_cointegration`/`stability_summary`, tal cual.
-    Arbitraje ESTADÍSTICO (pairs trading), no arbitraje entre exchanges —
-    ver el texto de la vista "Arbitraje" del frontend.
+    """Respuesta de `GET /api/pairs/detail` (Fase 12b, ampliada en 15b) —
+    análisis completo de UN par vía `pairs.cointegration.engle_granger`/
+    `half_life`, `pairs.stability.rolling_cointegration`/`stability_summary`,
+    y `pairs.backtest.backtest_pair`, todo tal cual. Arbitraje ESTADÍSTICO
+    (pairs trading), no arbitraje entre exchanges — ver el texto de la
+    vista "Arbitraje" del frontend.
     """
 
     asset_y: str = Field(description="Activo dependiente (\"y\" de la regresión log(y) = alpha + beta*log(x) + spread)")
@@ -400,10 +444,14 @@ class PairDetailResponse(BaseModel):
     zscore: list[float | None] = Field(description="Z-score expansivo del spread (pairs.signals.zscore)")
     zscore_actual: float | None = Field(description="Último valor del z-score — qué tan 'estirado' está el spread HOY")
     zscore_interpretacion: str = Field(description="Texto honesto: zona normal vs. extrema (|z|>2), o sin datos suficientes")
+    zscore_extremos: list[PairZscoreExtreme] = Field(
+        description="Todos los puntos históricos con |z| >= 2 — para marcarlos en el gráfico"
+    )
     estabilidad: PairStabilitySummary | None = Field(
         default=None, description="null si no hay historia suficiente para ni una ventana rolling (ver estabilidad_mensaje)"
     )
     estabilidad_mensaje: str | None = Field(default=None, description="Explica por qué 'estabilidad' es null, si aplica")
+    backtest: PairBacktestResult = Field(description="Backtest de la estrategia de reversión sobre este par (Fase 15b)")
 
 
 class VolumeProfileResponse(BaseModel):

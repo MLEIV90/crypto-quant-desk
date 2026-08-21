@@ -266,3 +266,29 @@ export const ARBITRAGE_NOT_OPERABLE_WARNING =
   "z-score de abajo puede igual mostrarse 'extremo' en este momento, pero sin cointegración estable ESO NO " +
   "ES UNA SEÑAL CONFIABLE: no hay garantía estadística de que el spread vaya a revertir. Tratá este análisis " +
   "como una exploración, no como una recomendación para operar.";
+
+// Fase 15b: scatter + regresión, y backtest de la estrategia sobre el spread.
+
+export const ARBITRAGE_ZSCORE_EXTREMES_HELP =
+  "Los puntos marcados son los momentos históricos donde el z-score tocó ±2 (zona extrema). Mirar si esos " +
+  "extremos volvieron hacia 0 después (revirtieron) o si el spread se quedó estirado es una forma visual de " +
+  "chequear si la reversión es real o solo pasó una vez por casualidad.";
+
+export const ARBITRAGE_SCATTER_HELP =
+  "Cada punto es un día: log-precio de X en el eje horizontal, log-precio de Y en el vertical. La línea es " +
+  "la recta de regresión (beta, la misma que arma el spread) — si los puntos están bien pegados a la línea, " +
+  "la relación lineal entre las dos monedas es fuerte; si están dispersos y desparramados, es débil, aunque " +
+  "el spread pueda parecer razonable en otras métricas.";
+
+export const ARBITRAGE_PAIR_BACKTEST_HELP =
+  "Simula la estrategia de reversión sobre ESTE par: entra corto-spread si el z-score sube por encima del " +
+  "umbral de entrada, largo-spread si baja por debajo, cierra cuando vuelve cerca de la media, y corta la " +
+  "pérdida (stop) si se sigue alejando. Dollar-neutral, rebalanceado a diario, con costos de transacción — " +
+  "ver el detalle de los supuestos en el backend (pairs/backtest.py). Es un backtest, no un simulador de lo " +
+  "que pasaría operando en vivo.";
+
+export const ARBITRAGE_PAIR_BACKTEST_NOT_OPERABLE_WARNING =
+  "Este backtest corre la estrategia igual, mecánicamente, sin importar si el par es operable o no — y eso " +
+  "es a propósito: sobre un par que NO está establemente cointegrado, lo ESPERABLE es que el backtest " +
+  "muestre pérdidas, un Sharpe pobre, o un resultado que no se sostiene. Verlo acá es para CONFIRMAR " +
+  "cuantitativamente que el par no es operable, no una sugerencia de que valga la pena operarlo igual.";

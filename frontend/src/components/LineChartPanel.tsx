@@ -11,12 +11,27 @@
  * `Chart.tsx` para Fibonacci/soporte-resistencia/pivotes) ancladas a la
  * PRIMERA serie — pensadas para las bandas de z-score (+2/-2/0), pero
  * genéricas para cualquier gráfico de línea futuro que las necesite.
+ *
+ * `markers` por serie (Fase 15b, vista "Arbitraje"): puntos puntuales
+ * marcados sobre ESA serie (`lightweight-charts.createSeriesMarkers`, la
+ * primitiva nativa de anotaciones de la librería) — pensado para resaltar
+ * los extremos históricos del z-score (|z|>=2), con posición EXACTA en el
+ * eje de precio (`position: "atPriceMiddle"` + `price`), no relativa a la
+ * vela como "aboveBar"/"belowBar".
  */
 
 import { useEffect, useRef } from "react";
-import { ColorType, createChart, CrosshairMode, LineSeries, LineStyle } from "lightweight-charts";
+import { ColorType, createChart, createSeriesMarkers, CrosshairMode, LineSeries, LineStyle } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from "lightweight-charts";
 import { COLORS } from "../theme";
+
+export interface LineSeriesMarkerSpec {
+  time: string;
+  price: number;
+  color: string;
+  shape?: "circle" | "square" | "arrowUp" | "arrowDown";
+  text?: string;
+}
 
 export interface LineSeriesSpec {
   id: string;
@@ -24,6 +39,7 @@ export interface LineSeriesSpec {
   color: string;
   data: { time: string; value: number | null }[];
   lineWidth?: 1 | 2 | 3 | 4;
+  markers?: LineSeriesMarkerSpec[];
 }
 
 export interface ReferenceLineSpec {
@@ -87,6 +103,21 @@ export function LineChartPanel({ series, height = 320, referenceLines = [] }: Li
         }
       });
       lineSeries.setData(points);
+
+      if (spec.markers && spec.markers.length > 0) {
+        createSeriesMarkers(
+          lineSeries,
+          spec.markers.map((marker) => ({
+            time: toTimestamp(marker.time),
+            position: "atPriceMiddle" as const,
+            price: marker.price,
+            color: marker.color,
+            shape: marker.shape ?? "circle",
+            text: marker.text,
+          })),
+        );
+      }
+
       return lineSeries;
     });
 

@@ -265,6 +265,32 @@ export interface PairStabilitySummary {
   estable: boolean;
 }
 
+export interface PairZscoreExtreme {
+  fecha: string;
+  z: number;
+}
+
+export interface PairBacktestMetrics {
+  total_return: number;
+  cagr: number;
+  ann_vol: number;
+  sharpe: number;
+  sortino: number;
+  max_drawdown: number;
+  calmar: number;
+  turnover_total: number;
+  turnover_medio_diario: number;
+  n_trades: number;
+  exposicion_media: number;
+  hit_rate: number;
+}
+
+export interface PairBacktestResult {
+  fechas: string[];
+  equity_curve: number[];
+  metrics: PairBacktestMetrics;
+}
+
 export interface PairDetailResponse {
   asset_y: string;
   asset_x: string;
@@ -280,8 +306,10 @@ export interface PairDetailResponse {
   zscore: (number | null)[];
   zscore_actual: number | null;
   zscore_interpretacion: string;
+  zscore_extremos: PairZscoreExtreme[];
   estabilidad: PairStabilitySummary | null;
   estabilidad_mensaje: string | null;
+  backtest: PairBacktestResult;
 }
 
 export interface PredictionResponse {
