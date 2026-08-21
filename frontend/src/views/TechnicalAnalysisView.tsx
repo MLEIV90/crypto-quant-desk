@@ -33,10 +33,11 @@
 import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
-import { ApiError, getOhlcv, getStudies, getSuggester, getVolumeProfile } from "../api";
+import { ApiError, getOhlcv, getOhlcvCsv, getStudies, getSuggester, getVolumeProfile } from "../api";
 import { AlertsPanel } from "../components/AlertsPanel";
 import { Chart } from "../components/Chart";
 import { ChartTypeSelector, DEFAULT_CHART_TYPE, type ChartTypeKey } from "../components/ChartTypeSelector";
+import { CsvDownloadButton } from "../components/CsvDownloadButton";
 import { DrawingTools } from "../components/DrawingTools";
 import { DOWNSAMPLE_THRESHOLD } from "../downsample";
 import { DEFAULT_ACTIVE_OSCILLATORS, OscillatorPanel, type OscillatorKey } from "../components/OscillatorPanel";
@@ -141,6 +142,12 @@ export function TechnicalAnalysisView({ asset, interval, assets, onAlertTriggere
                   Vista completa ({ohlcv.velas.length.toLocaleString("es-AR")} velas, más lento)
                 </label>
               )}
+              <CsvDownloadButton
+                label="Descargar CSV"
+                filename={`ohlcv_${asset}_${interval}.csv`}
+                fetchCsv={() => getOhlcvCsv(asset, interval, candleLimit)}
+                queryKey={["export-ohlcv-csv", asset, interval, candleLimit]}
+              />
             </div>
             <DrawingTools
               asset={asset}

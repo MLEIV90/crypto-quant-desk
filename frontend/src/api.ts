@@ -68,6 +68,35 @@ async function apiGet<T>(path: string, params: Record<string, string | number> =
   return (await response.json()) as T;
 }
 
+/**
+ * Como `apiGet`, pero para endpoints que devuelven un archivo binario
+ * (PDF/CSV descargable) en vez de JSON — usado por `getPdfReport` y las
+ * funciones `get*Csv` de exportación (Fase 17a).
+ */
+async function apiGetBlob(path: string, params: Record<string, string | number> = {}): Promise<Blob> {
+  const url = new URL(path, API_BASE_URL);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, String(value));
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url.toString());
+  } catch {
+    throw new ApiError(
+      `No se pudo conectar con la API en ${API_BASE_URL}. ¿Está corriendo "uvicorn api.main:app --reload"?`,
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new ApiError(body?.detail ?? `Error ${response.status} al llamar ${path}`, response.status);
+  }
+
+  return response.blob();
+}
+
 async function apiPost<T>(path: string, params: Record<string, string | number> = {}): Promise<T> {
   const url = new URL(path, API_BASE_URL);
   for (const [key, value] of Object.entries(params)) {
@@ -212,25 +241,23 @@ export function getPairsDetail(assetY: string, assetX: string, interval: string)
  * respuesta no es JSON sino el archivo PDF crudo — se devuelve como `Blob`
  * para que el llamador dispare la descarga en el navegador.
  */
-export async function getPdfReport(asset: string, interval: string): Promise<Blob> {
-  const url = new URL("/api/report", API_BASE_URL);
-  url.searchParams.set("asset", asset);
-  url.searchParams.set("interval", interval);
+export function getPdfReport(asset: string, interval: string): Promise<Blob> {
+  return apiGetBlob("/api/report", { asset, interval });
+}
 
-  let response: Response;
-  try {
-    response = await fetch(url.toString());
-  } catch {
-    throw new ApiError(
-      `No se pudo conectar con la API en ${API_BASE_URL}. ¿Está corriendo "uvicorn api.main:app --reload"?`,
-      0,
-    );
-  }
+/**
+ * Exportación a CSV (Fase 17a) — mismos cálculos que sus endpoints JSON
+ * hermanos (`getOhlcv`, `getStats`/`drawdown_analysis`, `getCorrelation`),
+ * solo cambia el formato de la respuesta. Ver `api/main.py::export_*`.
+ */
+export function getOhlcvCsv(asset: string, interval: string, limit: number): Promise<Blob> {
+  return apiGetBlob("/api/export/ohlcv", { asset, interval, limit });
+}
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new ApiError(body?.detail ?? `Error ${response.status} al llamar /api/report`, response.status);
-  }
+export function getDrawdownsCsv(asset: string, interval: string, topN: number): Promise<Blob> {
+  return apiGetBlob("/api/export/drawdowns", { asset, interval, top_n: topN });
+}
 
-  return response.blob();
+export function getCorrelationCsv(interval: string, limit: number, method: string): Promise<Blob> {
+  return apiGetBlob("/api/export/correlation", { interval, limit, method });
 }

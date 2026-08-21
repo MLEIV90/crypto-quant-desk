@@ -10,21 +10,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, getPdfReport } from "../api";
+import { triggerBlobDownload } from "../downloadBlob";
 
 interface ReportDownloadButtonProps {
   asset: string;
   interval: string;
-}
-
-function triggerBlobDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
 }
 
 export function ReportDownloadButton({ asset, interval }: ReportDownloadButtonProps) {

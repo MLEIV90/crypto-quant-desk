@@ -11,13 +11,14 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, getCorrelation } from "../api";
+import { ApiError, getCorrelation, getCorrelationCsv } from "../api";
 import { CorrelationHeatmap } from "../components/CorrelationHeatmap";
 import {
   CorrelationMethodSelector,
   DEFAULT_CORRELATION_METHOD,
   type CorrelationMethodKey,
 } from "../components/CorrelationMethodSelector";
+import { CsvDownloadButton } from "../components/CsvDownloadButton";
 import { candleLimitForPeriod, DEFAULT_PERIOD, PeriodSelector, type PeriodKey } from "../components/PeriodSelector";
 import { StatusMessage } from "../components/StatusMessage";
 import { CORRELATION_INTRO_HELP } from "../helpTexts";
@@ -74,6 +75,12 @@ export function CorrelationView({ interval }: CorrelationViewProps) {
       <div className="chart-controls-row">
         <PeriodSelector active={period} onChange={setPeriod} />
         <CorrelationMethodSelector active={method} onChange={setMethod} />
+        <CsvDownloadButton
+          label="Descargar CSV"
+          filename={`correlation_${interval}_${method}.csv`}
+          fetchCsv={() => getCorrelationCsv(interval, candleLimit, method)}
+          queryKey={["export-correlation-csv", interval, candleLimit, method]}
+        />
       </div>
 
       {errorMessage && <StatusMessage kind="error">{errorMessage}</StatusMessage>}

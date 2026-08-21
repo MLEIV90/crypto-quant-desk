@@ -17,7 +17,8 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, getGarchSeries, getOhlcv, getRisk } from "../api";
+import { ApiError, getGarchSeries, getOhlcv, getOhlcvCsv, getRisk } from "../api";
+import { CsvDownloadButton } from "../components/CsvDownloadButton";
 import { LineChartPanel } from "../components/LineChartPanel";
 import { MetricCard } from "../components/MetricCard";
 import { candleLimitForPeriod, PeriodSelector, type PeriodKey } from "../components/PeriodSelector";
@@ -107,6 +108,12 @@ export function RiskView({ asset }: RiskViewProps) {
           <div className="panel-subtitle-row">
             <h3 className="panel-subtitle">Precio ({asset})</h3>
             <PeriodSelector active={pricePeriod} onChange={setPricePeriod} />
+            <CsvDownloadButton
+              label="Descargar CSV"
+              filename={`ohlcv_${asset}_${RISK_INTERVAL}.csv`}
+              fetchCsv={() => getOhlcvCsv(asset, RISK_INTERVAL, priceCandleLimit)}
+              queryKey={["export-ohlcv-csv", asset, RISK_INTERVAL, priceCandleLimit]}
+            />
           </div>
           <LineChartPanel
             series={[

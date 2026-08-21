@@ -20,8 +20,9 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, getStats } from "../api";
+import { ApiError, getDrawdownsCsv, getStats } from "../api";
 import { BarChart, type BarChartDatum } from "../components/BarChart";
+import { CsvDownloadButton } from "../components/CsvDownloadButton";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { MetricCard } from "../components/MetricCard";
 import { MonthlyHeatmap } from "../components/MonthlyHeatmap";
@@ -170,10 +171,21 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
 
           {/* DRAWDOWNS HISTÓRICOS */}
           <div className="stats-section">
-            <h3 className="stats-section__title">
-              Drawdowns históricos
-              <InfoTooltip text={DRAWDOWN_HELP} />
-            </h3>
+            <div className="panel-subtitle-row">
+              <h3 className="stats-section__title">
+                Drawdowns históricos
+                <InfoTooltip text={DRAWDOWN_HELP} />
+              </h3>
+              <CsvDownloadButton
+                label="Descargar CSV"
+                filename={`drawdowns_${asset}_${interval}.csv`}
+                // top_n=10: mismo default que drawdown_analysis() y /api/stats
+                // (ver api/main.py::get_stats), para exportar la MISMA tabla
+                // que se ve en pantalla, ni más ni menos filas.
+                fetchCsv={() => getDrawdownsCsv(asset, interval, 10)}
+                queryKey={["export-drawdowns-csv", asset, interval]}
+              />
+            </div>
             {stats.drawdowns.length === 0 ? (
               <p className="view-note">Sin drawdowns registrados en el período disponible.</p>
             ) : (

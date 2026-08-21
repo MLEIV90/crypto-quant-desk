@@ -37,6 +37,7 @@ Uso (desarrollo):
 
 from __future__ import annotations
 
+import io
 import logging
 
 import pandas as pd
@@ -211,6 +212,21 @@ def _load_df(asset: str, interval: str) -> pd.DataFrame:
         return get_prices(asset, source="store", interval=interval, end=tomorrow, use_cache=False)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _csv_response(df: pd.DataFrame, filename: str, *, index: bool = False) -> Response:
+    """Serializa `df` a CSV (`pandas.DataFrame.to_csv`, sin reimplementar
+    ningún formateo propio) y lo envuelve en una respuesta descargable —
+    mismo patrón de `Content-Disposition: attachment` que ya usa
+    `GET /api/report` (Fase 16b) para el PDF, acá con `text/csv`.
+    """
+    buffer = io.StringIO()
+    df.to_csv(buffer, index=index)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _none_if_nan(value: float) -> float | None:
@@ -1047,28 +1063,16 @@ def get_pairs_detail(
 CORRELATION_METHODS: tuple[str, ...] = ("pearson", "spearman")
 
 
-@router.get(
-    "/correlation",
-    response_model=CorrelationResponse,
-    summary="Matriz de correlación entre activos (sobre RETORNOS, no precios)",
-)
-def get_correlation(
-    interval: str = "1d",
-    limit: int = Query(
-        365, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de fechas comunes más recientes a usar"
-    ),
-    method: str = "pearson",
-) -> CorrelationResponse:
-    """Reutiliza `eda.eda_report.correlation_matrix` (Fase 1) para el
-    cálculo y `analysis.comparison.align_common_dates` (Fase 12a) para
-    recortar al período pedido — mismo patrón que `/api/compare`: alinea
-    por fechas comunes y recorta a las últimas `limit`, así "el período
-    elegido" corta la ventana ANTES de correlacionar, no después.
+def _compute_correlation(interval: str, limit: int, method: str) -> tuple[pd.DataFrame, list[str], int]:
+    """Cálculo compartido por `GET /api/correlation` y `GET /api/export/correlation`
+    (Fase 17a): reutiliza `eda.eda_report.correlation_matrix` (Fase 1) y
+    `analysis.comparison.align_common_dates` (Fase 12a) — alinea por fechas
+    comunes y recorta a las últimas `limit` ANTES de correlacionar, así "el
+    período elegido" corta la ventana antes del cálculo, no después.
 
-    Correlación de RETORNOS, no de precios: dos precios pueden estar muy
-    correlacionados solo porque ambos tienen tendencia (no estacionariedad),
-    sin que eso diga nada sobre si se mueven juntos día a día — ver
-    `eda.eda_report.correlation_matrix` y el texto que muestra el frontend.
+    Devuelve `(corr_df, assets, fechas_n)` — `corr_df` ya indexado/columnado
+    por activo, para que cada endpoint lo serialice a su formato (JSON o CSV)
+    sin repetir el cálculo.
     """
     _validate_interval(interval)
     if method not in CORRELATION_METHODS:
@@ -1082,15 +1086,96 @@ def get_correlation(
     trimmed_returns = {asset: aligned[asset] for asset in assets}
 
     corr_df = correlation_matrix(trimmed_returns, method=method)
+    return corr_df, assets, len(aligned)
+
+
+@router.get(
+    "/correlation",
+    response_model=CorrelationResponse,
+    summary="Matriz de correlación entre activos (sobre RETORNOS, no precios)",
+)
+def get_correlation(
+    interval: str = "1d",
+    limit: int = Query(
+        365, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de fechas comunes más recientes a usar"
+    ),
+    method: str = "pearson",
+) -> CorrelationResponse:
+    """Reutiliza `_compute_correlation` (ver ahí para el detalle de qué
+    calcula y por qué) y solo arma la respuesta JSON.
+
+    Correlación de RETORNOS, no de precios: dos precios pueden estar muy
+    correlacionados solo porque ambos tienen tendencia (no estacionariedad),
+    sin que eso diga nada sobre si se mueven juntos día a día — ver
+    `eda.eda_report.correlation_matrix` y el texto que muestra el frontend.
+    """
+    corr_df, assets, fechas_n = _compute_correlation(interval, limit, method)
     matriz = [[_none_if_nan(corr_df.loc[row, col]) for col in assets] for row in assets]
 
     return CorrelationResponse(
         interval=interval,
         method=method,
-        fechas_n=len(aligned),
+        fechas_n=fechas_n,
         activos=assets,
         matriz=matriz,
     )
+
+
+# --------------------------------------------------------------------------
+# GET /api/export/* (Fase 17a) — mismos cálculos que sus endpoints JSON
+# hermanos, solo cambia el formato de salida a CSV descargable (ver
+# `_csv_response`). Ninguno reimplementa ningún cálculo.
+# --------------------------------------------------------------------------
+
+
+@router.get("/export/ohlcv", summary="Velas OHLCV en CSV descargable")
+def export_ohlcv(
+    asset: str,
+    interval: str = "1d",
+    limit: int = Query(
+        500, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de velas más recientes a exportar"
+    ),
+) -> Response:
+    """Reutiliza `data.loaders.get_prices` (vía `_load_df`) — misma fuente
+    que `GET /api/ohlcv`, acá servida como CSV en vez de JSON.
+    """
+    df = _load_df(asset, interval).tail(limit)
+    csv_df = df.reset_index().rename(columns={"timestamp": "fecha"})
+    return _csv_response(csv_df, f"ohlcv_{asset}_{interval}.csv")
+
+
+@router.get("/export/drawdowns", summary="Drawdowns históricos en CSV descargable")
+def export_drawdowns(
+    asset: str,
+    interval: str = "1d",
+    top_n: int = Query(10, gt=0, le=100, description="Cantidad de peores drawdowns a exportar"),
+) -> Response:
+    """Reutiliza `analysis.cycles.drawdown_analysis` tal cual — misma fuente
+    que la tabla de "Drawdowns históricos" de la vista "Ciclos y Estadística"
+    (`GET /api/stats`), acá servida como CSV en vez de JSON.
+    """
+    close = _load_df(asset, interval)["close"]
+    episodios = drawdown_analysis(close, top_n=top_n)
+    csv_df = pd.DataFrame(episodios)
+    return _csv_response(csv_df, f"drawdowns_{asset}_{interval}.csv")
+
+
+@router.get("/export/correlation", summary="Matriz de correlación en CSV descargable")
+def export_correlation(
+    interval: str = "1d",
+    limit: int = Query(
+        365, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de fechas comunes más recientes a usar"
+    ),
+    method: str = "pearson",
+) -> Response:
+    """Reutiliza `_compute_correlation` (mismo cálculo que `GET /api/correlation`)
+    — acá se exporta la matriz tal cual la devuelve `pandas.DataFrame.corr`,
+    con el nombre de cada activo como índice de fila.
+    """
+    corr_df, _assets, _fechas_n = _compute_correlation(interval, limit, method)
+    corr_df = corr_df.copy()
+    corr_df.index.name = "activo"
+    return _csv_response(corr_df, f"correlation_{interval}_{method}.csv", index=True)
 
 
 # --------------------------------------------------------------------------

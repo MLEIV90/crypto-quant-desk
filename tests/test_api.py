@@ -838,6 +838,69 @@ def test_get_report_invalid_interval_returns_400() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/export/* (Fase 17a, CSV descargable) — mismos cálculos que sus
+# endpoints JSON hermanos (/api/ohlcv, /api/stats, /api/correlation), solo
+# cambia el formato de salida.
+# --------------------------------------------------------------------------
+
+
+def test_export_ohlcv_returns_downloadable_csv_with_expected_columns() -> None:
+    response = client.get("/api/export/ohlcv", params={"asset": "BTC", "interval": "1d", "limit": 50})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+    assert "ohlcv_BTC_1d.csv" in response.headers["content-disposition"]
+
+    lines = response.text.strip().splitlines()
+    assert lines[0] == "fecha,open,high,low,close,volume"
+    assert len(lines) == 51  # encabezado + 50 velas
+
+
+def test_export_ohlcv_unknown_asset_returns_404() -> None:
+    response = client.get("/api/export/ohlcv", params={"asset": "DOGE"})
+
+    assert response.status_code == 404
+
+
+def test_export_drawdowns_returns_downloadable_csv_with_expected_columns() -> None:
+    response = client.get("/api/export/drawdowns", params={"asset": "BTC", "top_n": 5})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+    assert "drawdowns_BTC_1d.csv" in response.headers["content-disposition"]
+
+    lines = response.text.strip().splitlines()
+    assert lines[0] == "fecha_pico,fecha_fondo,profundidad_pct,fecha_recuperacion,dias_caida,dias_recuperacion"
+    assert len(lines) - 1 <= 5
+
+
+def test_export_drawdowns_unknown_asset_returns_404() -> None:
+    response = client.get("/api/export/drawdowns", params={"asset": "DOGE"})
+
+    assert response.status_code == 404
+
+
+def test_export_correlation_returns_downloadable_csv_with_all_assets() -> None:
+    response = client.get("/api/export/correlation", params={"interval": "1d", "limit": 200})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+
+    lines = response.text.strip().splitlines()
+    assert lines[0] == "activo,BTC,ETH,SOL,BNB,LTC"
+    assert len(lines) == 6  # encabezado + 5 activos
+
+
+def test_export_correlation_invalid_method_returns_400() -> None:
+    response = client.get("/api/export/correlation", params={"method": "kendall"})
+
+    assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------
 # Documentación automática (Swagger/OpenAPI)
 # --------------------------------------------------------------------------
 
@@ -854,5 +917,5 @@ def test_docs_and_openapi_schema_are_available() -> None:
         "/api/risk", "/api/backtest", "/api/garch-series", "/api/prediction",
         "/api/data-status", "/api/refresh", "/api/stats", "/api/compare",
         "/api/pairs/screening", "/api/pairs/detail", "/api/volume-profile", "/api/correlation",
-        "/api/report",
+        "/api/report", "/api/export/ohlcv", "/api/export/drawdowns", "/api/export/correlation",
     }
