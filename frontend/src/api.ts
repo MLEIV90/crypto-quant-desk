@@ -203,3 +203,34 @@ export function getPairsScreening(interval: string = "1d"): Promise<PairScreenin
 export function getPairsDetail(assetY: string, assetX: string, interval: string): Promise<PairDetailResponse> {
   return apiGet<PairDetailResponse>("/api/pairs/detail", { asset_y: assetY, asset_x: assetX, interval });
 }
+
+/**
+ * Informe PDF descargable (Fase 16b) — ver `api/main.py::get_report`
+ * (`reports/pdf_report.py`). MUY LENTO (ajusta un GARCH y corre
+ * cointegración rolling sobre todos los pares): del orden de 30-90
+ * segundos. A diferencia del resto de las funciones de este archivo, la
+ * respuesta no es JSON sino el archivo PDF crudo — se devuelve como `Blob`
+ * para que el llamador dispare la descarga en el navegador.
+ */
+export async function getPdfReport(asset: string, interval: string): Promise<Blob> {
+  const url = new URL("/api/report", API_BASE_URL);
+  url.searchParams.set("asset", asset);
+  url.searchParams.set("interval", interval);
+
+  let response: Response;
+  try {
+    response = await fetch(url.toString());
+  } catch {
+    throw new ApiError(
+      `No se pudo conectar con la API en ${API_BASE_URL}. ¿Está corriendo "uvicorn api.main:app --reload"?`,
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new ApiError(body?.detail ?? `Error ${response.status} al llamar /api/report`, response.status);
+  }
+
+  return response.blob();
+}

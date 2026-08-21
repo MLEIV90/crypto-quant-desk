@@ -13,6 +13,7 @@ import { getAssets } from "./api";
 import { AssetSelector } from "./components/AssetSelector";
 import { DataStatusBar } from "./components/DataStatusBar";
 import { NavTabs, type ViewKey } from "./components/NavTabs";
+import { ReportDownloadButton } from "./components/ReportDownloadButton";
 import { WatchlistPanel } from "./components/WatchlistPanel";
 import { TechnicalAnalysisView } from "./views/TechnicalAnalysisView";
 import { RiskView } from "./views/RiskView";
@@ -93,6 +94,7 @@ function Dashboard() {
       <WatchlistPanel assets={assets} activeAsset={asset} onSelectAsset={setAsset} flashingAssets={flashingAssets} />
 
       <DataStatusBar asset={asset} interval={dataStatusInterval} />
+      <ReportDownloadButton asset={asset} interval={dataStatusInterval} />
 
       <p className="disclaimer">{DISCLAIMER_TEXT}</p>
 

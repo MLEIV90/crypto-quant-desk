@@ -13,10 +13,14 @@ endpoint MÁS LENTO de todos: entrena/evalúa el modelo primario de ML con
 validación purgeada (varios ajustes de XGBoost) en cada request, del orden
 de 15-30 segundos — un frontend NUNCA debería dispararlo automáticamente
 al cargar una vista, solo ante una acción explícita del usuario (un botón
-"correr predicción"). `/api/backtest` corre un backtest vectorizado
-completo (rápido). El resto (`/api/assets`, `/api/ohlcv`, `/api/studies`,
-`/api/suggester`, `/api/data-status`, `/api/stats`, `/api/compare`) son
-livianos (indicadores/estadística vectorizados, sin ajuste de modelos).
+"correr predicción"). `/api/report` (Fase 16b) es LENTO por una razón
+distinta: ajusta un GARCH Y corre cointegración rolling sobre todos los
+pares (30-90 segundos), también pensado para un botón explícito, nunca
+automático — ver `reports/pdf_report.py`. `/api/backtest` corre un
+backtest vectorizado completo (rápido). El resto (`/api/assets`,
+`/api/ohlcv`, `/api/studies`, `/api/suggester`, `/api/data-status`,
+`/api/stats`, `/api/compare`) son livianos (indicadores/estadística
+vectorizados, sin ajuste de modelos).
 Ninguno cachea entre requests — cada llamada recalcula desde cero (simple y
 correcto; una capa de caché queda para una fase futura si hiciera falta).
 
@@ -36,7 +40,7 @@ from __future__ import annotations
 import logging
 
 import pandas as pd
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from analysis.comparison import align_common_dates, compare_assets
@@ -95,6 +99,7 @@ from pairs.backtest import DEFAULT_PAIR_ENTRY, DEFAULT_PAIR_EXIT, DEFAULT_PAIR_S
 from pairs.cointegration import engle_granger, half_life
 from pairs.signals import zscore
 from pairs.stability import rolling_cointegration, screen_pairs_stability, stability_summary
+from reports.pdf_report import build_report
 from signals.engine import generate_positions, latest_recommendation
 from signals.indicators import add_all_indicators
 from signals.returns import log_returns, simple_returns
@@ -1085,6 +1090,41 @@ def get_correlation(
         fechas_n=len(aligned),
         activos=assets,
         matriz=matriz,
+    )
+
+
+# --------------------------------------------------------------------------
+# GET /api/report
+# --------------------------------------------------------------------------
+
+
+@router.get("/report", summary="Informe PDF descargable (gráficas + explicaciones)")
+def get_report(asset: str, interval: str = "1d") -> Response:
+    """Reutiliza `reports.pdf_report.build_report` — arma un PDF con
+    gráficas (matplotlib) y texto explicativo a partir de TODO el backend de
+    análisis (riesgo/GARCH, estudios/sugeridor, ciclos/estadística,
+    correlación, screening de pares), sin recalcular nada acá. El informe
+    EXPLICA los análisis, no recomienda comprar/vender (mismo encuadre
+    honesto que el resto de la API).
+
+    MUY LENTO: ajusta un modelo GARCH y corre cointegración rolling sobre
+    todos los pares de `config.UNIVERSE` (ver el docstring de rendimiento
+    de `reports/pdf_report.py`) — del orden de 30 a 90 segundos. Pensado
+    para dispararse desde un botón explícito del usuario, nunca automático.
+    """
+    _validate_asset(asset)
+    _validate_interval(interval)
+
+    try:
+        pdf_bytes = build_report(asset, interval=interval)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    filename = f"informe_{asset}_{interval}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

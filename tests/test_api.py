@@ -807,6 +807,37 @@ def test_get_pairs_detail_invalid_interval_returns_400() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/report (Fase 16b, informe PDF descargable) — LENTO: ajusta un GARCH
+# y corre cointegración rolling sobre todos los pares (ver
+# reports/pdf_report.py). Un solo test end-to-end alcanza para confirmar
+# que el archivo es un PDF válido y descargable; el detalle de cada
+# sección se prueba directo sobre `build_report` en tests/test_pdf_report.py.
+# --------------------------------------------------------------------------
+
+
+def test_get_report_returns_downloadable_pdf() -> None:
+    response = client.get("/api/report", params={"asset": "ETH", "interval": "1d"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert "attachment" in response.headers["content-disposition"]
+    assert "informe_ETH_1d.pdf" in response.headers["content-disposition"]
+    assert response.content.startswith(b"%PDF")
+
+
+def test_get_report_unknown_asset_returns_404() -> None:
+    response = client.get("/api/report", params={"asset": "DOGE"})
+
+    assert response.status_code == 404
+
+
+def test_get_report_invalid_interval_returns_400() -> None:
+    response = client.get("/api/report", params={"asset": "BTC", "interval": "5m"})
+
+    assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------
 # Documentación automática (Swagger/OpenAPI)
 # --------------------------------------------------------------------------
 
@@ -823,4 +854,5 @@ def test_docs_and_openapi_schema_are_available() -> None:
         "/api/risk", "/api/backtest", "/api/garch-series", "/api/prediction",
         "/api/data-status", "/api/refresh", "/api/stats", "/api/compare",
         "/api/pairs/screening", "/api/pairs/detail", "/api/volume-profile", "/api/correlation",
+        "/api/report",
     }
