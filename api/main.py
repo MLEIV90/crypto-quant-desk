@@ -88,7 +88,7 @@ from api.models import (
 )
 from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
 from config import TRANSACTION_COST_BPS, UNIVERSE
-from data.loaders import get_prices
+from data.loaders import RESAMPLED_INTERVALS, get_prices
 from data.snapshot import GeoblockedError, last_closed_candle_open_time, update_snapshot
 from eda.eda_report import adf_test, correlation_matrix
 from metrics.risk_measures import expected_shortfall, value_at_risk
@@ -109,11 +109,18 @@ from signals.suggester import suggest
 
 logger = logging.getLogger(__name__)
 
-# Intervalos que efectivamente tiene exportados el snapshot local
-# (`source="store"`, ver scripts/export_snapshot.py y Fase 6b). Todos los
-# endpoints de LECTURA solo leen de ahí — el único que golpea Binance en
-# vivo es `POST /api/refresh` (Fase 9a, ver data.snapshot.update_snapshot).
-SUPPORTED_INTERVALS: tuple[str, ...] = ("1d", "1h")
+# Intervalos que acepta la API de LECTURA. "1d"/"1h" son los que el
+# snapshot local tiene exportados de verdad (`source="store"`, ver
+# scripts/export_snapshot.py y Fase 6b); "4h"/"1w" (Fase 17b) son
+# DERIVADOS por resampleo on-the-fly desde esos dos (ver
+# `data.loaders.RESAMPLED_INTERVALS`/`_load_store`) — no hace falta bajar
+# datos nuevos ni exportar un snapshot propio para ellos. Todos los
+# endpoints de LECTURA solo leen del snapshot local — el único que golpea
+# Binance en vivo es `POST /api/refresh` (Fase 9a, ver
+# data.snapshot.update_snapshot), que a propósito NO acepta "4h"/"1w"
+# directamente (ver `refresh_snapshot`): no hay nada propio que refrescar
+# en un intervalo derivado, se refresca su base.
+SUPPORTED_INTERVALS: tuple[str, ...] = ("1d", "1h", "4h", "1w")
 DEFAULT_RISK_INTERVAL = "1d"  # el modelo GARCH del proyecto es diario, ver models/garch.py
 
 # Tope de `limit` en /api/ohlcv y /api/studies (Fase 11): por encima del
@@ -131,8 +138,16 @@ ONCHAIN_ENABLED_ASSETS: frozenset[str] = frozenset({"BTC", "ETH"})
 # como desactualizado (Fase 9a): una vela diaria recién cerrada tiene hasta
 # 1 día de "antigüedad normal"; una horaria, hasta 2h (algo de margen sobre
 # el intervalo mismo, para no marcar en ámbar el instante justo después de
-# que cierra la última vela).
-STALE_THRESHOLD_SECONDS: dict[str, float] = {"1d": 24 * 3600, "1h": 2 * 3600}
+# que cierra la última vela). "4h"/"1w" (Fase 17b) siguen el mismo criterio
+# que su intervalo BASE respectivo: 2x la duración de la vela para "4h"
+# (como "1h"), 1x para "1w" (como "1d") — ver `get_data_status` para cómo
+# se calcula la frescura real de un intervalo derivado.
+STALE_THRESHOLD_SECONDS: dict[str, float] = {
+    "1d": 24 * 3600,
+    "1h": 2 * 3600,
+    "4h": 8 * 3600,
+    "1w": 7 * 24 * 3600,
+}
 
 _PREDICTION_N_SPLITS = 5
 _PREDICTION_EMBARGO_PCT = 0.01
@@ -703,14 +718,28 @@ def get_data_status(asset: str, interval: str = "1d") -> DataStatusResponse:
     `update_snapshot` para decidir qué bajar): si coincide con lo que ya
     tenemos, antigüedad-vs-lo-más-fresco-posible es 0 y no es
     "desactualizado", sin importar la hora del día.
+
+    Fase 17b: "4h"/"1w" son DERIVADOS por resampleo (`data.loaders.RESAMPLED_INTERVALS`)
+    — no tienen un "closed candle" propio bien definido para pandas (`1w`
+    en particular: `Timestamp.floor("W")` ni siquiera es una operación
+    válida, "W" es una frecuencia anclada al calendario, no fija). La
+    frescura real de un intervalo derivado la determina su snapshot BASE
+    ("1h"/"1d"), así que acá se compara la última vela del snapshot base
+    contra el último cierre YA CERRADO de ESE base — `ultima_fecha` en la
+    respuesta sigue siendo la del intervalo pedido (lo que el usuario ve),
+    pero `desactualizado` refleja la frescura real de los datos subyacentes.
     """
     df = _load_df(asset, interval)
     ultima_fecha = df.index.max()
+
+    base_interval = RESAMPLED_INTERVALS.get(interval, interval)
+    base_last = df.index.max() if base_interval == interval else _load_df(asset, base_interval).index.max()
+
     now = pd.Timestamp.now(tz="UTC")
     delta = now - ultima_fecha
     threshold = STALE_THRESHOLD_SECONDS.get(interval, STALE_THRESHOLD_SECONDS["1d"])
-    last_closed = last_closed_candle_open_time(interval)
-    gap_vs_freshest = (last_closed - ultima_fecha).total_seconds()
+    last_closed_base = last_closed_candle_open_time(base_interval)
+    gap_vs_freshest = (last_closed_base - base_last).total_seconds()
 
     return DataStatusResponse(
         asset=asset,
@@ -740,9 +769,25 @@ def refresh_snapshot(asset: str, interval: str = "1d") -> RefreshResponse:
     Puede tardar varios segundos según cuántas velas nuevas haya. Pensado
     para dispararse desde una acción EXPLÍCITA del usuario (un botón
     "Actualizar datos"), nunca automáticamente al cargar una vista.
+
+    "4h"/"1w" (Fase 17b) son DERIVADOS por resampleo — no tienen snapshot
+    propio que bajar de Binance (`data.snapshot.SUPPORTED_INTERVALS` sigue
+    siendo solo `("1d", "1h")`), así que acá se rechazan con un 400 claro
+    en vez de dejar que `update_snapshot` explote con un `ValueError` crudo:
+    refrescar el intervalo BASE (`data.loaders.RESAMPLED_INTERVALS`) ya deja
+    al día también al derivado, que se recalcula al leer, no se guarda aparte.
     """
     _validate_asset(asset)
     _validate_interval(interval)
+    if interval in RESAMPLED_INTERVALS:
+        base_interval = RESAMPLED_INTERVALS[interval]
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"interval='{interval}' se deriva por resampleo de '{base_interval}' — no hay nada propio "
+                f"que refrescar. Refrescá interval='{base_interval}' y '{interval}' queda al día solo."
+            ),
+        )
     try:
         result = update_snapshot(asset, interval)
     except FileNotFoundError as exc:

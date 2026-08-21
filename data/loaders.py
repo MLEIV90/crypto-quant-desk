@@ -68,7 +68,27 @@ _INTERVAL_TO_PANDAS_FREQ: dict[str, str] = {
     "1h": "h",
     "4h": "4h",
     "1d": "D",
+    "1w": "W",
 }
+
+# Intervalos DERIVADOS por resampleo (Fase 17b): no existe un snapshot
+# propio para ellos en `config.SNAPSHOT_DIR` — no hace falta bajar datos
+# nuevos, `_load_store` los calcula on-the-fly resampleando el snapshot
+# BASE ya exportado. "4h" se deriva del horario ("1h"); "1w", del diario
+# ("1d"). Público (sin "_") porque `api/main.py` lo reutiliza para saber
+# qué intervalo hay que refrescar (`POST /api/refresh`) cuando se pide uno
+# derivado — no tiene sentido "refrescar" un 4h/1w en sí, se refresca su
+# base y el derivado queda al día solo (se recalcula al leer, no se guarda
+# aparte).
+RESAMPLED_INTERVALS: dict[str, str] = {"4h": "1h", "1w": "1d"}
+
+# Regla de `pandas.DataFrame.resample` para cada intervalo derivado. "1w"
+# usa el default de pandas para `freq="W"`: semanas que TERMINAN el
+# DOMINGO (el índice de cada vela semanal resultante es ese domingo, no el
+# lunes de inicio) — cripto opera 24/7, así que no hay una "semana de
+# mercado" estándar que respetar; se eligió el default de pandas por
+# simplicidad en vez de inventar una convención propia.
+_RESAMPLE_RULE: dict[str, str] = {"4h": "4h", "1w": "W"}
 
 
 # --------------------------------------------------------------------------
@@ -326,19 +346,42 @@ def _load_coingecko(symbol: str, start: str, end: str) -> pd.DataFrame:
     return out.sort_index()
 
 
+def _resample_ohlcv(df: pd.DataFrame, rule: str) -> pd.DataFrame:
+    """Reagrupa un OHLCV ya estandarizado a una frecuencia más baja, con la
+    agregación OHLCV estándar (Fase 17b): open = PRIMER valor del período,
+    high = MÁXIMO, low = MÍNIMO, close = ÚLTIMO valor, volume = SUMA.
+
+    `resample(rule)` genera igual una fila para cualquier período dentro del
+    rango [min(index), max(index)], incluso uno sin ninguna vela base
+    adentro (todos los campos quedan NaN) — `dropna(subset=["close"])`
+    descarta esos períodos vacíos en vez de devolver velas fantasma.
+    """
+    resampled = df.resample(rule).agg(
+        {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+    )
+    return resampled.dropna(subset=["close"])
+
+
 def _load_store(asset: str, interval: str, start: str, end: str) -> pd.DataFrame:
     """Lee un snapshot local ya exportado por `scripts/export_snapshot.py`
-    (`config.SNAPSHOT_DIR/{asset}_{interval}.parquet`).
+    (`config.SNAPSHOT_DIR/{asset}_{base_interval}.parquet`).
+
+    Fase 17b: si `interval` es uno DERIVADO (`RESAMPLED_INTERVALS`, "4h" o
+    "1w"), lee el snapshot BASE correspondiente ("1h"/"1d") y lo resamplea
+    on-the-fly (`_resample_ohlcv`) — no existe un parquet propio para estos
+    dos, así que `base_interval` puede diferir del `interval` pedido.
 
     Pensado para verificar el pipeline offline con un dataset ya compartido,
     sin depender de la disponibilidad de Binance en el entorno. Si el
-    archivo no existe, lanza un error claro indicando cómo generarlo.
+    archivo BASE no existe, lanza un error claro indicando cómo generarlo.
     """
-    path = SNAPSHOT_DIR / f"{asset}_{interval}.parquet"
+    base_interval = RESAMPLED_INTERVALS.get(interval, interval)
+    path = SNAPSHOT_DIR / f"{asset}_{base_interval}.parquet"
     if not path.exists():
         raise FileNotFoundError(
-            f"No existe el snapshot local '{path}'. Corré 'python scripts/export_snapshot.py' "
-            "para generarlo antes de usar source='store'."
+            f"No existe el snapshot local '{path}'. Corré 'python scripts/export_snapshot.py "
+            f"--interval {base_interval}' para generarlo antes de usar source='store'"
+            + (f" (interval='{interval}' se deriva de '{base_interval}' por resampleo)." if interval != base_interval else ".")
         )
 
     df = pd.read_parquet(path)
@@ -346,6 +389,9 @@ def _load_store(asset: str, interval: str, start: str, end: str) -> pd.DataFrame
         df.index = df.index.tz_localize("UTC")
     else:
         df.index = df.index.tz_convert("UTC")
+
+    if interval in _RESAMPLE_RULE:
+        df = _resample_ohlcv(df, _RESAMPLE_RULE[interval])
 
     start_ts = pd.Timestamp(start, tz="UTC")
     end_ts = pd.Timestamp(end, tz="UTC")

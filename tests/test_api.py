@@ -51,7 +51,7 @@ def test_get_assets_returns_universe_and_timeframes() -> None:
     assert response.status_code == 200
     body = response.json()
     assert set(body["activos"]) == {"BTC", "ETH", "SOL", "BNB", "LTC"}
-    assert set(body["timeframes"]) == {"1d", "1h"}
+    assert set(body["timeframes"]) == {"1d", "1h", "4h", "1w"}
 
 
 # --------------------------------------------------------------------------
@@ -101,6 +101,29 @@ def test_get_ohlcv_invalid_interval_returns_400() -> None:
     assert response.status_code == 400
 
 
+def test_get_ohlcv_accepts_4h_derived_interval() -> None:
+    # Fase 17b: "4h" se deriva por resampleo del snapshot horario — no hace
+    # falta un snapshot propio, /api/ohlcv debe aceptarlo igual que "1d"/"1h".
+    response = client.get("/api/ohlcv", params={"asset": "BTC", "interval": "4h", "limit": 30})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["interval"] == "4h"
+    assert len(body["velas"]) == 30
+    fechas = [vela["fecha"] for vela in body["velas"]]
+    assert fechas == sorted(fechas)
+
+
+def test_get_ohlcv_accepts_1w_derived_interval() -> None:
+    # Fase 17b: "1w" se deriva por resampleo del snapshot diario.
+    response = client.get("/api/ohlcv", params={"asset": "BTC", "interval": "1w", "limit": 20})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["interval"] == "1w"
+    assert len(body["velas"]) == 20
+
+
 def test_get_ohlcv_invalid_limit_returns_422() -> None:
     response = client.get("/api/ohlcv", params={"asset": "BTC", "limit": 0})
 
@@ -140,6 +163,19 @@ def test_get_studies_returns_series_aligned_to_fechas() -> None:
     # chikou en la última vela es SIEMPRE None por construcción (usa close
     # futuro que todavía no existe) — no es un fallo, ver signals/studies.py::ichimoku.
     assert body["ichimoku_chikou"][-1] is None
+
+
+def test_get_studies_accepts_4h_and_1w_derived_intervals() -> None:
+    # Fase 17b: los indicadores son todos por CANTIDAD DE VELAS (RSI/SMA/MACD
+    # ventanas en barras, no en tiempo calendario), así que funcionan sobre
+    # cualquier intervalo sin cambios — esto confirma que 4h/1w no rompen
+    # el endpoint (no hace falta reimplementar nada indicador por indicador).
+    for interval in ("4h", "1w"):
+        response = client.get("/api/studies", params={"asset": "BTC", "interval": interval, "limit": 100})
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["fechas"]) == 100
+        assert len(body["sma_20"]) == 100
 
 
 def test_get_studies_unknown_asset_returns_404() -> None:
@@ -382,6 +418,57 @@ def test_get_data_status_flags_stale_hourly_snapshot(tmp_path: Path, monkeypatch
     assert response.json()["desactualizado"] is True  # umbral horario: 2h, no 1 día
 
 
+def test_get_data_status_4h_uses_base_hourly_freshness_with_wider_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fase 17b: "4h" se deriva del snapshot horario y evalúa su frescura
+    # contra ESE snapshot base con un umbral propio (8h, el doble de "1h")
+    # — los mismos datos que arriba se marcan "desactualizado" para
+    # interval="1h" (5h de antigüedad > umbral de 2h) siguen "al día" para
+    # interval="4h" (5h < umbral de 8h): una vista más gruesa tolera más
+    # demora del dato base.
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    old_date = pd.Timestamp.now(tz="UTC").floor("h") - pd.Timedelta(hours=5)
+    _write_fake_store_snapshot(tmp_path, "BTC", "1h", old_date)
+
+    response = client.get("/api/data-status", params={"asset": "BTC", "interval": "4h"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["interval"] == "4h"
+    assert body["desactualizado"] is False
+
+
+def test_get_data_status_4h_flags_stale_when_base_hourly_gap_exceeds_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    old_date = pd.Timestamp.now(tz="UTC").floor("h") - pd.Timedelta(hours=10)
+    _write_fake_store_snapshot(tmp_path, "BTC", "1h", old_date)
+
+    response = client.get("/api/data-status", params={"asset": "BTC", "interval": "4h"})
+
+    assert response.status_code == 200
+    assert response.json()["desactualizado"] is True  # 10h > umbral de 8h
+
+
+def test_get_data_status_1w_uses_base_daily_freshness_with_wider_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Mismo criterio que "4h" arriba, pero "1w" se deriva del snapshot
+    # DIARIO con un umbral de 7 días (vs. 1 día para "1d" solo).
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    old_date = pd.Timestamp.now(tz="UTC").floor("D") - pd.Timedelta(days=3)
+    _write_fake_store_snapshot(tmp_path, "BTC", "1d", old_date)
+
+    response = client.get("/api/data-status", params={"asset": "BTC", "interval": "1w"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["interval"] == "1w"
+    assert body["desactualizado"] is False  # 3 días < umbral de 7 días para "1w"
+
+
 # --------------------------------------------------------------------------
 # POST /api/refresh (Fase 9a) — mockeado, NUNCA pega a Binance en tests
 # --------------------------------------------------------------------------
@@ -456,6 +543,33 @@ def test_post_refresh_missing_snapshot_returns_404(monkeypatch: pytest.MonkeyPat
     response = client.post("/api/refresh", params={"asset": "BTC", "interval": "1d"})
 
     assert response.status_code == 404
+
+
+def test_post_refresh_rejects_derived_interval_4h(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Fase 17b: "4h" no tiene snapshot propio que bajar de Binance (se
+    # deriva por resampleo del horario) — debe rechazarse con un 400 claro
+    # en vez de propagar el ValueError crudo de data.snapshot.update_snapshot.
+    def fake_update_snapshot(asset: str, interval: str) -> dict:
+        raise AssertionError("update_snapshot no debería llamarse para un intervalo derivado")
+
+    monkeypatch.setattr(api_main, "update_snapshot", fake_update_snapshot)
+
+    response = client.post("/api/refresh", params={"asset": "BTC", "interval": "4h"})
+
+    assert response.status_code == 400
+    assert "1h" in response.json()["detail"]
+
+
+def test_post_refresh_rejects_derived_interval_1w(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_update_snapshot(asset: str, interval: str) -> dict:
+        raise AssertionError("update_snapshot no debería llamarse para un intervalo derivado")
+
+    monkeypatch.setattr(api_main, "update_snapshot", fake_update_snapshot)
+
+    response = client.post("/api/refresh", params={"asset": "BTC", "interval": "1w"})
+
+    assert response.status_code == 400
+    assert "1d" in response.json()["detail"]
 
 
 def test_post_refresh_unknown_asset_returns_404() -> None:

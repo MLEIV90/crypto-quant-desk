@@ -11,6 +11,13 @@
  * `/api/ohlcv`/`/api/studies`). Pasar el MISMO `period`/`candleLimit` a
  * ambos endpoints es lo que mantiene sincronizados el precio y los
  * osciladores (RSI/MACD/Estocástico) — ver `views/TechnicalAnalysisView.tsx`.
+ *
+ * Fase 17b: agrega "4h" y "1w" (derivados por resampleo, ver
+ * `data.loaders.RESAMPLED_INTERVALS`) a `CANDLE_DURATION_DAYS` — la
+ * cantidad de velas por período ya no es una tabla a mano por intervalo
+ * (que había que ampliar cada vez que se agrega uno nuevo), se calcula
+ * dividiendo "días calendario del período" por "duración de una vela en
+ * días", genérico para cualquier intervalo presente en ese mapa.
  */
 
 import { InfoTooltip } from "./InfoTooltip";
@@ -35,26 +42,35 @@ const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
 // (~58.000 velas horarias desde 2020, ~3.150 diarias desde 2018).
 const MAX_API_LIMIT = 60_000;
 
-// Velas por período, por intervalo. El resto de los períodos sigue una
-// aproximación calendario (días * 24 = horas). "todo" (Fase 11, fix del
+// Días calendario que cubre cada período, salvo "todo" (Fase 11, fix del
 // rango "Todo"): en vez de un número inventado que podía quedarse corto
 // contra el histórico real, pide directamente el tope que acepta el
 // backend — como el backend recorta con `.tail(limit)`, pedir MÁS de lo
-// que existe simplemente devuelve TODO lo disponible, sin inventar una
-// cantidad "mágica" por activo/intervalo que haya que mantener a mano.
-const CANDLES_PER_PERIOD: Record<PeriodKey, { "1d": number; "1h": number }> = {
-  "1W": { "1d": 7, "1h": 168 },
-  "1M": { "1d": 30, "1h": 720 },
-  "3M": { "1d": 90, "1h": 2160 },
-  "6M": { "1d": 180, "1h": 4320 },
-  "1A": { "1d": 365, "1h": 8760 },
-  "3A": { "1d": 1095, "1h": 26280 },
-  todo: { "1d": MAX_API_LIMIT, "1h": MAX_API_LIMIT },
+// que existe simplemente devuelve TODO lo disponible.
+const CALENDAR_DAYS_PER_PERIOD: Record<Exclude<PeriodKey, "todo">, number> = {
+  "1W": 7,
+  "1M": 30,
+  "3M": 90,
+  "6M": 180,
+  "1A": 365,
+  "3A": 1095,
+};
+
+// Duración de una vela de cada intervalo, en DÍAS calendario (Fase 17b) —
+// única tabla que hay que ampliar al agregar un intervalo nuevo, en vez de
+// una fila por cada combinación período x intervalo.
+const CANDLE_DURATION_DAYS: Record<string, number> = {
+  "1h": 1 / 24,
+  "4h": 4 / 24,
+  "1d": 1,
+  "1w": 7,
 };
 
 export function candleLimitForPeriod(period: PeriodKey, interval: string): number {
-  const table = CANDLES_PER_PERIOD[period];
-  const raw = interval === "1h" ? table["1h"] : table["1d"];
+  if (period === "todo") return MAX_API_LIMIT;
+  const days = CALENDAR_DAYS_PER_PERIOD[period];
+  const candleDurationDays = CANDLE_DURATION_DAYS[interval] ?? 1;
+  const raw = Math.ceil(days / candleDurationDays);
   return Math.min(raw, MAX_API_LIMIT);
 }
 

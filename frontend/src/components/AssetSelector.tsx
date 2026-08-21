@@ -13,6 +13,8 @@
 const TIMEFRAME_LABELS: Record<string, string> = {
   "1d": "Diario (1d)",
   "1h": "Horario (1h)",
+  "4h": "4 horas (4h)",
+  "1w": "Semanal (1w)",
 };
 
 interface AssetSelectorProps {
