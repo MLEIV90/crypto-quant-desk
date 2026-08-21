@@ -1,10 +1,17 @@
 /**
- * Vista "Estadística" (Fase 11) — consume `/api/stats` (Fase 11, sobre
- * `analysis.statistics` + `eda.eda_report.adf_test`, reutilizados tal
- * cual). Cuatro bloques: estacionalidad, estacionariedad, autocorrelación
- * y ciclos — mismo criterio de honestidad que el resto de la app: NADA de
+ * Vista "Ciclos y Estadística" (Fase 11, REHECHA en Fase 15a) — consume
+ * `/api/stats` (`analysis.statistics` + `analysis.cycles` + `eda.eda_report.adf_test`,
+ * reutilizados tal cual). Mismo criterio de honestidad de siempre: NADA de
  * esto predice el precio, ver `STATS_INTRO_HELP` y los tooltips de cada
  * bloque en `../helpTexts.ts`.
+ *
+ * Fase 15a: se sacó el periodograma de ciclos de 2-3 días (ruido de alta
+ * frecuencia, sin significado de mercado) y también el bar chart de
+ * estacionalidad MENSUAL agregada (un solo promedio por mes, mezclando
+ * todos los años) — lo reemplaza el mapa de calor mes x año de acá abajo,
+ * que muestra la estacionalidad real año por año en vez de un promedio que
+ * esconde qué tan distinto fue cada año. Se agregan drawdowns históricos,
+ * fases de mercado bull/bear, y (solo BTC) ciclos de halving.
  *
  * Siempre en diario salvo que se pida explícitamente horario — la
  * estacionalidad horaria (`estacionalidad_horaria`) solo llega si
@@ -17,29 +24,42 @@ import { ApiError, getStats } from "../api";
 import { BarChart, type BarChartDatum } from "../components/BarChart";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { MetricCard } from "../components/MetricCard";
+import { MonthlyHeatmap } from "../components/MonthlyHeatmap";
 import { StatusMessage } from "../components/StatusMessage";
 import {
   AUTOCORRELATION_HELP,
-  CYCLES_HELP,
-  HALVING_HELP,
+  DRAWDOWN_HELP,
+  HALVING_CYCLE_HELP,
+  MARKET_PHASES_HELP,
+  MONTHLY_HEATMAP_HELP,
   SEASONALITY_HELP,
   STATIONARITY_HELP,
   STATS_INTRO_HELP,
 } from "../helpTexts";
-import type { AutocorrelationPoint, PeriodogramResponse, SeasonalityBucket } from "../types";
-
-const MONTH_LABELS: Record<number, string> = {
-  1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
-  7: "Jul", 8: "Ago", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dic",
-};
+import { COLORS } from "../theme";
+import type { AutocorrelationPoint, SeasonalityBucket } from "../types";
 
 const WEEKDAY_LABELS: Record<number, string> = {
   0: "Lun", 1: "Mar", 2: "Mié", 3: "Jue", 4: "Vie", 5: "Sáb", 6: "Dom",
 };
 
-function formatPercent(value: number): string {
+function formatDecimalPercent(value: number): string {
   const sign = value >= 0 ? "+" : "";
   return `${sign}${(value * 100).toFixed(2)}%`;
+}
+
+/** Los campos de ciclos (drawdowns/fases/halving) ya vienen en PUNTOS
+ * PORCENTUALES desde el backend (p. ej. -50.0 == -50%), a diferencia de
+ * `estacionalidad_*`/`autocorrelacion` (escala decimal, 0.01 == 1%) — dos
+ * formatters distintos a propósito, para no mezclar las dos escalas.
+ */
+function formatScaledPercent(value: number): string {
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)}%`;
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString();
 }
 
 function seasonalityToBarData(buckets: SeasonalityBucket[], labels?: Record<number, string>): BarChartDatum[] {
@@ -50,7 +70,7 @@ function seasonalityToBarData(buckets: SeasonalityBucket[], labels?: Record<numb
       return {
         label,
         value: b.retorno_medio,
-        title: `${label}: ${formatPercent(b.retorno_medio)} (n=${b.n})`,
+        title: `${label}: ${formatDecimalPercent(b.retorno_medio)} (n=${b.n})`,
       };
     });
 }
@@ -62,19 +82,6 @@ function acfToBarData(points: AutocorrelationPoint[], field: "acf_retornos" | "a
       label: p.lag % 5 === 0 ? String(p.lag) : "",
       value,
       title: `lag ${p.lag}: ${value.toFixed(3)}`,
-    };
-  });
-}
-
-function periodogramToBarData(periodograma: PeriodogramResponse): BarChartDatum[] {
-  return periodograma.frecuencias.map((freq, index) => {
-    const power = periodograma.potencia[index] ?? 0;
-    const periodDays = freq > 0 ? 1 / freq : null;
-    const showLabel = index % 15 === 0 && periodDays !== null;
-    return {
-      label: showLabel && periodDays !== null ? `${periodDays.toFixed(0)}d` : "",
-      value: power,
-      title: periodDays !== null ? `período ~${periodDays.toFixed(1)} días: potencia ${power.toFixed(5)}` : "nivel medio (no es un ciclo)",
     };
   });
 }
@@ -96,27 +103,20 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
 
       {errorMessage && <StatusMessage kind="error">{errorMessage}</StatusMessage>}
       {!errorMessage && statsQuery.isLoading && (
-        <StatusMessage kind="loading">Calculando estadística de {asset}…</StatusMessage>
+        <StatusMessage kind="loading">Calculando ciclos y estadística de {asset}…</StatusMessage>
       )}
 
       {!errorMessage && stats && (
         <>
-          {/* ESTACIONALIDAD */}
+          {/* ESTACIONALIDAD (día de semana / hora) */}
           <div className="stats-section">
             <h3 className="stats-section__title">
               Estacionalidad
-              <InfoTooltip text={SEASONALITY_HELP.monthly} />
+              <InfoTooltip text={SEASONALITY_HELP.weekday} />
             </h3>
             <div className="stats-grid">
               <div>
-                <p className="view-note">Retorno medio por mes</p>
-                <BarChart data={seasonalityToBarData(stats.estacionalidad_mensual, MONTH_LABELS)} />
-              </div>
-              <div>
-                <p className="view-note">
-                  Retorno medio por día de semana
-                  <InfoTooltip text={SEASONALITY_HELP.weekday} placement="bottom" />
-                </p>
+                <p className="view-note">Retorno medio por día de semana</p>
                 <BarChart data={seasonalityToBarData(stats.estacionalidad_semanal, WEEKDAY_LABELS)} />
               </div>
               {stats.estacionalidad_horaria && (
@@ -135,10 +135,7 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
               <InfoTooltip text={STATIONARITY_HELP} />
             </h3>
             <div className="metric-grid">
-              <MetricCard
-                label="Precio: ¿estacionario?"
-                value={stats.adf_precio.es_estacionaria ? "Sí" : "No"}
-              />
+              <MetricCard label="Precio: ¿estacionario?" value={stats.adf_precio.es_estacionaria ? "Sí" : "No"} />
               <MetricCard label="Precio: p-valor" value={stats.adf_precio.p_valor.toFixed(4)} />
               <MetricCard
                 label="Retornos: ¿estacionarios?"
@@ -169,32 +166,135 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
             </div>
           </div>
 
-          {/* CICLOS */}
+          {/* DRAWDOWNS HISTÓRICOS */}
           <div className="stats-section">
             <h3 className="stats-section__title">
-              Ciclos (periodograma)
-              <InfoTooltip text={CYCLES_HELP} />
+              Drawdowns históricos
+              <InfoTooltip text={DRAWDOWN_HELP} />
             </h3>
-            <p className="view-note">Potencia por período (extremo izquierdo = ciclos cortos, derecho = largos)</p>
-            <BarChart data={periodogramToBarData(stats.periodograma)} positiveColor="var(--color-accent)" />
-
-            <ul className="stats-periods-list">
-              {stats.periodograma.top_periodos.map((p, index) => (
-                <li key={index} className="stats-periods-list__row">
-                  <span>Período dominante #{index + 1}</span>
-                  <strong>{p.periodo_dias.toFixed(1)} días</strong>
-                </li>
-              ))}
-            </ul>
-
-            {stats.halvings_btc && (
-              <div className="honesty-banner">
-                {HALVING_HELP}
-                <ul className="stats-halvings-list">
-                  {stats.halvings_btc.map((date) => (
-                    <li key={date}>{date}</li>
+            {stats.drawdowns.length === 0 ? (
+              <p className="view-note">Sin drawdowns registrados en el período disponible.</p>
+            ) : (
+              <table className="metrics-table">
+                <thead>
+                  <tr>
+                    <th>Pico</th>
+                    <th>Fondo</th>
+                    <th>Profundidad</th>
+                    <th>Días de caída</th>
+                    <th>Recuperación</th>
+                    <th>Días de recuperación</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.drawdowns.map((d, index) => (
+                    <tr key={index}>
+                      <td>{formatDate(d.fecha_pico)}</td>
+                      <td>{formatDate(d.fecha_fondo)}</td>
+                      <td style={{ color: COLORS.danger }}>{formatScaledPercent(d.profundidad_pct)}</td>
+                      <td>{d.dias_caida}</td>
+                      <td>{d.fecha_recuperacion ? formatDate(d.fecha_recuperacion) : "Todavía no recuperó"}</td>
+                      <td>{d.dias_recuperacion ?? "—"}</td>
+                    </tr>
                   ))}
-                </ul>
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* FASES DE MERCADO */}
+          <div className="stats-section">
+            <h3 className="stats-section__title">
+              Fases de mercado
+              <InfoTooltip text={MARKET_PHASES_HELP} />
+            </h3>
+            {stats.fases_mercado.length === 0 ? (
+              <p className="view-note">Ningún movimiento cruzó el umbral de 20% en el período disponible.</p>
+            ) : (
+              <table className="metrics-table">
+                <thead>
+                  <tr>
+                    <th>Tipo</th>
+                    <th>Inicio</th>
+                    <th>Fin</th>
+                    <th>Duración</th>
+                    <th>Retorno</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.fases_mercado.map((f, index) => (
+                    <tr key={index}>
+                      <td style={{ color: f.tipo === "bull" ? COLORS.success : COLORS.danger, fontWeight: 700 }}>
+                        {f.tipo === "bull" ? "Alcista" : "Bajista"}
+                      </td>
+                      <td>{formatDate(f.fecha_inicio)}</td>
+                      <td>{formatDate(f.fecha_fin)}</td>
+                      <td>{f.duracion_dias} días</td>
+                      <td style={{ color: f.retorno_pct >= 0 ? COLORS.success : COLORS.danger }}>
+                        {formatScaledPercent(f.retorno_pct)}
+                      </td>
+                      <td>{f.confirmada ? "Confirmada" : "En curso"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {asset === "BTC" && stats.ciclos_halving && (
+              <>
+                <h4 className="stats-section__title">
+                  Ciclos de halving
+                  <InfoTooltip text={HALVING_CYCLE_HELP} placement="bottom" />
+                </h4>
+                <div className="honesty-banner">
+                  Solo {stats.ciclos_halving.n_halvings_con_datos} de los {stats.ciclos_halving.n_halvings_totales}{" "}
+                  halvings de Bitcoin caen dentro del histórico de precios disponible — n={stats.ciclos_halving.n_halvings_con_datos}{" "}
+                  es una muestra estadísticamente insuficiente para tratar el "ciclo de 4 años" como una regla.
+                </div>
+                {stats.ciclos_halving.ciclos.length > 0 && (
+                  <table className="metrics-table">
+                    <thead>
+                      <tr>
+                        <th>Inicio</th>
+                        <th>Fin</th>
+                        <th>Estado</th>
+                        <th>Duración</th>
+                        <th>Retorno</th>
+                        <th>Drawdown máximo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stats.ciclos_halving.ciclos.map((c, index) => (
+                        <tr key={index}>
+                          <td>{formatDate(c.fecha_inicio)}</td>
+                          <td>{formatDate(c.fecha_fin)}</td>
+                          <td>{c.en_curso ? "En curso" : "Completo"}</td>
+                          <td>{c.duracion_dias} días</td>
+                          <td style={{ color: c.retorno_pct >= 0 ? COLORS.success : COLORS.danger }}>
+                            {formatScaledPercent(c.retorno_pct)}
+                          </td>
+                          <td style={{ color: COLORS.danger }}>{formatScaledPercent(c.drawdown_maximo_pct)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* MAPA DE CALOR MES x AÑO */}
+          <div className="stats-section">
+            <h3 className="stats-section__title">
+              Retorno por mes y año
+              <InfoTooltip text={MONTHLY_HEATMAP_HELP} />
+            </h3>
+            {stats.heatmap_mensual.anios.length === 0 ? (
+              <p className="view-note">Sin suficiente historia para armar el mapa de calor.</p>
+            ) : (
+              <div className="stats-heatmap-wrapper">
+                <MonthlyHeatmap anios={stats.heatmap_mensual.anios} matriz={stats.heatmap_mensual.matriz} />
               </div>
             )}
           </div>

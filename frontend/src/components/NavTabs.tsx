@@ -18,7 +18,7 @@ const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "riesgo", label: "Riesgo" },
   { key: "backtest", label: "Backtest" },
   { key: "research", label: "Research" },
-  { key: "estadistica", label: "Estadística" },
+  { key: "estadistica", label: "Ciclos y Estadística" },
   { key: "comparacion", label: "Comparación" },
   { key: "arbitraje", label: "Arbitraje" },
   { key: "correlacion", label: "Correlación" },

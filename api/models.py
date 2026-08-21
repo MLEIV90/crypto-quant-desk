@@ -236,20 +236,59 @@ class AutocorrelationPoint(BaseModel):
     )
 
 
-class PeriodogramTopPeriod(BaseModel):
-    """Un período dominante de `analysis.statistics.spectral_periodogram` (Fase 11)."""
+class DrawdownEpisode(BaseModel):
+    """Un episodio de drawdown (`analysis.cycles.drawdown_analysis`, Fase 15a) — reutilizado tal cual."""
 
-    periodo_dias: float
-    potencia: float
+    fecha_pico: datetime = Field(description="Último máximo histórico antes de empezar a caer")
+    fecha_fondo: datetime = Field(description="Día del mínimo dentro de este episodio")
+    profundidad_pct: float = Field(description="(precio_fondo / precio_pico - 1) * 100 — negativo")
+    fecha_recuperacion: datetime | None = Field(
+        description="Primer día en que el precio vuelve a igualar el pico — null si todavía no recuperó"
+    )
+    dias_caida: int = Field(description="Días corridos entre el pico y el fondo")
+    dias_recuperacion: int | None = Field(description="Días corridos entre el fondo y la recuperación, o null")
 
 
-class PeriodogramResponse(BaseModel):
-    """Periodograma completo de `analysis.statistics.spectral_periodogram` (Fase 11)."""
+class MarketPhase(BaseModel):
+    """Una fase bull/bear (`analysis.cycles.market_phases`, Fase 15a) — reutilizado tal cual."""
 
-    frecuencias: list[float] = Field(description="Frecuencias en ciclos/día")
-    potencia: list[float | None] = Field(description="Densidad espectral de potencia, mismo orden que 'frecuencias'")
-    top_periodos: list[PeriodogramTopPeriod] = Field(
-        description="Hasta 3 períodos dominantes en días, ordenados por potencia descendente"
+    tipo: str = Field(description='"bull" o "bear"')
+    fecha_inicio: datetime
+    fecha_fin: datetime
+    duracion_dias: int
+    retorno_pct: float = Field(description="(precio_fin / precio_inicio - 1) * 100")
+    confirmada: bool = Field(
+        description="True si un movimiento opuesto de threshold (20%) ya cerró la fase; False = tramo más reciente, todavía 'en curso'"
+    )
+
+
+class HalvingCycle(BaseModel):
+    """Un ciclo entre halvings de Bitcoin (`analysis.cycles.halving_cycles`, Fase 15a)."""
+
+    fecha_inicio: datetime
+    fecha_fin: datetime
+    en_curso: bool = Field(description="True para el tramo desde el último halving disponible hasta hoy")
+    duracion_dias: int
+    retorno_pct: float
+    drawdown_maximo_pct: float = Field(description="Peor caída pico-a-valle DENTRO de este ciclo")
+
+
+class HalvingCyclesInfo(BaseModel):
+    """Respuesta completa de `analysis.cycles.halving_cycles` (Fase 15a) — incluye el
+    caveat de tamaño de muestra explícito (ver `n_halvings_totales`/`n_halvings_con_datos`).
+    """
+
+    ciclos: list[HalvingCycle]
+    n_halvings_totales: int = Field(description="4 — la cantidad real de halvings en TODA la historia de Bitcoin")
+    n_halvings_con_datos: int = Field(description="Cuántos de esos 4 caen dentro del histórico de precios disponible")
+
+
+class MonthlyYearlyHeatmap(BaseModel):
+    """Matriz mes x año de retornos compuestos (`analysis.cycles.monthly_yearly_heatmap`, Fase 15a)."""
+
+    anios: list[int] = Field(description="Años presentes, ascendente — columnas de 'matriz'")
+    matriz: list[list[float | None]] = Field(
+        description="12 filas (índice 0=enero..11=diciembre), una columna por año en 'anios'; retorno_pct o null si no hay datos para ese mes-año"
     )
 
 
@@ -265,10 +304,17 @@ class AdfResult(BaseModel):
 
 
 class StatsResponse(BaseModel):
-    """Respuesta de `GET /api/stats` (Fase 11) — estacionalidad, autocorrelación,
-    ciclos (periodograma) y estacionariedad (ADF). NADA de esto predice el
-    precio — ver el docstring de `analysis/statistics.py` y los tooltips
-    del frontend (`helpTexts.ts`) para el porqué de cada honestidad.
+    """Respuesta de `GET /api/stats` (Fase 11, rehecha en Fase 15a) —
+    estacionalidad, autocorrelación, estacionariedad (ADF) y ciclos de
+    mercado REALES (drawdowns/fases/halving/heatmap mensual). NADA de esto
+    predice el precio — ver el docstring de `analysis/statistics.py`,
+    `analysis/cycles.py` y los tooltips del frontend (`helpTexts.ts`).
+
+    Fase 15a: se SACÓ el periodograma espectral de esta respuesta — sobre
+    retornos diarios daba "ciclos" de 2-3 días (ruido de alta frecuencia,
+    sin ningún significado de mercado). La función
+    `analysis.statistics.spectral_periodogram` sigue existiendo en el
+    backend (marcada deprecada), pero ya no se expone acá.
     """
 
     asset: str
@@ -279,12 +325,17 @@ class StatsResponse(BaseModel):
         default=None, description="Solo presente si interval='1h' — con velas diarias, todas caerían en la hora 0"
     )
     autocorrelacion: list[AutocorrelationPoint]
-    periodograma: PeriodogramResponse
     adf_precio: AdfResult = Field(description="ADF sobre el NIVEL de precio — típicamente NO estacionario")
     adf_retornos: AdfResult = Field(description="ADF sobre los RETORNOS — típicamente SÍ estacionarios")
     halvings_btc: list[str] | None = Field(
         default=None, description="Fechas de halving de Bitcoin (ISO), solo presente si asset='BTC'"
     )
+    drawdowns: list[DrawdownEpisode] = Field(description="Los peores drawdowns históricos, más profundo primero")
+    fases_mercado: list[MarketPhase] = Field(description="Fases bull/bear delimitadas por un umbral de 20%, orden cronológico")
+    ciclos_halving: HalvingCyclesInfo | None = Field(
+        default=None, description="Solo presente si asset='BTC' — ciclos entre halvings, con el caveat de n chico"
+    )
+    heatmap_mensual: MonthlyYearlyHeatmap = Field(description="Retorno compuesto de cada mes de cada año")
 
 
 class PairScreeningRow(BaseModel):

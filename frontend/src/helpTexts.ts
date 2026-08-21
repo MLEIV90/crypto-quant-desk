@@ -104,24 +104,21 @@ export const PERIOD_SELECTOR_HELP =
   "velas y puede tardar 1-2 segundos en cargar. Es esperado, no un error.";
 
 // --------------------------------------------------------------------------
-// Vista "Estadística" (Fase 11) — /api/stats. Mismo criterio de honestidad
-// que el resto: nada de esto predice el precio, se explicita en cada bloque.
+// Vista "Ciclos y Estadística" (Fase 11, rehecha en Fase 15a) — /api/stats.
+// Mismo criterio de honestidad que el resto: nada de esto predice el
+// precio, se explicita en cada bloque.
 // --------------------------------------------------------------------------
 
 export const STATS_INTRO_HELP =
-  "Estos análisis describen patrones HISTÓRICOS del activo (estacionalidad, autocorrelación, ciclos) — " +
-  "ninguno predice el precio de mañana. En cripto, con pocos años de historia disponible, tratalos como " +
-  "observaciones curiosas para tu propio criterio, no como reglas para operar.";
+  "Estos análisis describen patrones HISTÓRICOS del activo (estacionalidad, autocorrelación, drawdowns, " +
+  "fases de mercado) — ninguno predice el precio de mañana. En cripto, con pocos años de historia " +
+  "disponible, tratalos como observaciones curiosas para tu propio criterio, no como reglas para operar.";
 
 export const SEASONALITY_HELP = {
-  monthly:
-    "Retorno promedio histórico agrupando todas las velas por MES calendario, sin importar el año. Con pocos " +
-    "años de historia, cada mes tiene pocas observaciones independientes — un patrón acá es sugestivo, no una " +
-    "regla. Verde = promedio positivo, rojo = negativo.",
   weekday:
     "Retorno promedio histórico agrupando por día de la semana. A diferencia de las acciones, cripto opera " +
-    "los 7 días — no hay 'efecto fin de semana' por falta de mercado abierto. Igual que la estacionalidad " +
-    "mensual: patrón débil e inestable, no una regla operable.",
+    "los 7 días — no hay 'efecto fin de semana' por falta de mercado abierto. Patrón débil e inestable, no " +
+    "una regla operable.",
 };
 
 export const STATIONARITY_HELP =
@@ -142,18 +139,34 @@ export const AUTOCORRELATION_HELP = {
     "en cripto — 'clustering de volatilidad', la motivación de modelar con GARCH (ver la vista Riesgo).",
 };
 
-export const CYCLES_HELP =
-  "El periodograma busca ciclos periódicos en los retornos. Un pico fuerte y aislado SERÍA evidencia de un " +
-  "ciclo; la AUSENCIA de un pico claro es el resultado típico en series financieras — los retornos se parecen " +
-  "mucho a ruido. Los 'períodos dominantes' de acá abajo son los picos más altos del periodograma, no " +
-  "necesariamente ciclos reales operables — antes de confiar en uno, sospechá primero de coincidencias de " +
-  "calendario o ruido de muestra chica.";
+// Fase 15a: reemplaza al periodograma (CYCLES_HELP) — sobre retornos
+// diarios daba "ciclos" de 2-3 días, ruido de alta frecuencia sin ningún
+// significado de mercado. Se reemplaza por ciclos que sí tienen un
+// significado reconocible: drawdowns, fases bull/bear, y halvings.
 
-export const HALVING_HELP =
+export const DRAWDOWN_HELP =
+  "Un drawdown es una caída desde un máximo histórico hasta el mínimo posterior, antes de volver a superar " +
+  "ese máximo. 'Profundidad' es cuánto cayó desde el pico; 'días de caída' cuánto tardó en llegar al fondo; " +
+  "'días de recuperación' cuánto tardó en volver a superar el pico anterior (vacío si todavía no recuperó). " +
+  "Es historia, no una garantía de que el próximo drawdown vaya a tener una forma parecida.";
+
+export const MARKET_PHASES_HELP =
+  "Acá una fase pasa a ser BEAR en cuanto el precio cae 20% o más desde un máximo, y BULL en cuanto sube 20% " +
+  "o más desde un mínimo — una regla mecánica y arbitraria (el 20% es la convención que usan medios " +
+  "financieros, no un número mágico). Con otro umbral las fechas de cada fase cambiarían. La fase más " +
+  "reciente queda marcada 'en curso' porque todavía no se confirmó el próximo cruce de 20% en sentido opuesto.";
+
+export const HALVING_CYCLE_HELP =
   "El halving reduce a la mitad la recompensa por bloque de Bitcoin cada ~4 años (hecho conocido, no un " +
-  "ajuste estadístico). La narrativa de un 'ciclo de 4 años' post-halving es popular, pero con apenas 4 " +
-  "halvings ocurridos hasta ahora es una muestra de n=4 — insuficiente para confirmar un patrón estadístico, " +
-  "por más que la narrativa sea conocida.";
+  "ajuste estadístico). La narrativa de un 'ciclo de 4 años' post-halving es popular, pero Bitcoin solo tuvo " +
+  "4 halvings en TODA su historia — n=4 es una muestra estadísticamente insuficiente para confirmar un " +
+  "patrón, por más conocida que sea la narrativa. Tratá cada ciclo como UN dato entre 4, no como una regla.";
+
+export const MONTHLY_HEATMAP_HELP =
+  "Retorno compuesto de cada mes, año por año — a diferencia de un promedio único por mes (que mezcla todos " +
+  "los años en un solo número y esconde qué tan distinto fue cada año), acá se ve la estacionalidad REAL: " +
+  "si un mes 'suele' ser positivo, pero con años muy dispares, el patrón es mucho más débil de lo que " +
+  "sugeriría el promedio solo. Verde = mes positivo, rojo = negativo; casillero vacío = sin datos ese mes-año.";
 
 // --------------------------------------------------------------------------
 // Vista "Comparación" (Fase 12a) — /api/compare

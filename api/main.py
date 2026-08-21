@@ -40,12 +40,12 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from analysis.comparison import align_common_dates, compare_assets
+from analysis.cycles import drawdown_analysis, halving_cycles, market_phases, monthly_yearly_heatmap
 from analysis.statistics import (
     BTC_HALVING_DATES,
     autocorrelation,
     hourly_seasonality,
     monthly_seasonality,
-    spectral_periodogram,
     weekday_seasonality,
 )
 from api.models import (
@@ -57,15 +57,18 @@ from api.models import (
     CompareResponse,
     CorrelationResponse,
     DataStatusResponse,
+    DrawdownEpisode,
     EquityPoint,
     GarchSeriesResponse,
+    HalvingCycle,
+    HalvingCyclesInfo,
+    MarketPhase,
+    MonthlyYearlyHeatmap,
     OHLCVResponse,
     PairDetailResponse,
     PairScreeningResponse,
     PairScreeningRow,
     PairStabilitySummary,
-    PeriodogramResponse,
-    PeriodogramTopPeriod,
     PredictionResponse,
     RefreshResponse,
     RiskResponse,
@@ -211,6 +214,39 @@ def _series_to_list(series: pd.Series) -> list[float | None]:
 
 def _dates_to_list(index: pd.DatetimeIndex) -> list:
     return list(index.to_pydatetime())
+
+
+def _drawdown_to_model(d: dict) -> DrawdownEpisode:
+    return DrawdownEpisode(
+        fecha_pico=d["fecha_pico"].to_pydatetime(),
+        fecha_fondo=d["fecha_fondo"].to_pydatetime(),
+        profundidad_pct=d["profundidad_pct"],
+        fecha_recuperacion=d["fecha_recuperacion"].to_pydatetime() if d["fecha_recuperacion"] is not None else None,
+        dias_caida=d["dias_caida"],
+        dias_recuperacion=d["dias_recuperacion"],
+    )
+
+
+def _phase_to_model(p: dict) -> MarketPhase:
+    return MarketPhase(
+        tipo=p["tipo"],
+        fecha_inicio=p["fecha_inicio"].to_pydatetime(),
+        fecha_fin=p["fecha_fin"].to_pydatetime(),
+        duracion_dias=p["duracion_dias"],
+        retorno_pct=p["retorno_pct"],
+        confirmada=p["confirmada"],
+    )
+
+
+def _halving_cycle_to_model(c: dict) -> HalvingCycle:
+    return HalvingCycle(
+        fecha_inicio=c["fecha_inicio"].to_pydatetime(),
+        fecha_fin=c["fecha_fin"].to_pydatetime(),
+        en_curso=c["en_curso"],
+        duracion_dias=c["duracion_dias"],
+        retorno_pct=c["retorno_pct"],
+        drawdown_maximo_pct=c["drawdown_maximo_pct"],
+    )
 
 
 def _seasonality_to_buckets(df: pd.DataFrame, *, has_median_std: bool) -> list[SeasonalityBucket]:
@@ -709,19 +745,26 @@ def refresh_snapshot(asset: str, interval: str = "1d") -> RefreshResponse:
 @router.get(
     "/stats",
     response_model=StatsResponse,
-    summary="Análisis estadístico: estacionalidad, autocorrelación, ciclos y estacionariedad",
+    summary="Análisis estadístico y de ciclos de mercado (drawdowns, fases, halving, estacionalidad)",
 )
 def get_stats(asset: str, interval: str = "1d") -> StatsResponse:
-    """Reutiliza `analysis.statistics` (Fase 11, estacionalidad/ACF/
-    periodograma) y `eda.eda_report.adf_test` (Fase 1, estacionariedad) tal
-    cual — ningún cálculo estadístico nuevo vive acá, solo se arma la
-    respuesta. NADA de esto predice el precio (ver el docstring de
-    `analysis/statistics.py`).
+    """Reutiliza `analysis.statistics` (Fase 11, estacionalidad/ACF),
+    `analysis.cycles` (Fase 15a, drawdowns/fases de mercado/ciclos de
+    halving/heatmap mensual) y `eda.eda_report.adf_test` (Fase 1,
+    estacionariedad) tal cual — ningún cálculo estadístico nuevo vive acá,
+    solo se arma la respuesta. NADA de esto predice el precio (ver el
+    docstring de `analysis/statistics.py`/`analysis/cycles.py`).
 
     `estacionalidad_horaria` solo se calcula si `interval == "1h"` (con
     velas diarias todas caerían en la hora 0, sin información — ver
-    `analysis.statistics.hourly_seasonality`). `halvings_btc` solo se
-    incluye si `asset == "BTC"`.
+    `analysis.statistics.hourly_seasonality`). `halvings_btc`/`ciclos_halving`
+    solo se incluyen si `asset == "BTC"`.
+
+    Fase 15a: se sacó el periodograma espectral de esta respuesta — sobre
+    retornos diarios daba "ciclos" de 2-3 días (ruido de alta frecuencia,
+    sin significado de mercado). Se reemplaza por ciclos con significado
+    real: drawdowns históricos, fases bull/bear, y (para BTC) los ciclos
+    entre halvings.
     """
     df = _load_df(asset, interval)
     close = df["close"]
@@ -735,7 +778,6 @@ def get_stats(asset: str, interval: str = "1d") -> StatsResponse:
         else None
     )
 
-    periods_per_day = 24.0 if interval == "1h" else 1.0
     acf_df = autocorrelation(returns)
     autocorrelacion = [
         AutocorrelationPoint(
@@ -746,15 +788,20 @@ def get_stats(asset: str, interval: str = "1d") -> StatsResponse:
         for lag, row in acf_df.iterrows()
     ]
 
-    periodogram = spectral_periodogram(returns, periods_per_day=periods_per_day)
-    periodograma = PeriodogramResponse(
-        frecuencias=[float(f) for f in periodogram["frecuencias"]],
-        potencia=[_none_if_nan(p) for p in periodogram["potencia"]],
-        top_periodos=[
-            PeriodogramTopPeriod(periodo_dias=periodo, potencia=potencia)
-            for periodo, potencia in periodogram["top_periodos_dias"]
-        ],
-    )
+    drawdowns = [_drawdown_to_model(d) for d in drawdown_analysis(close)]
+    fases_mercado = [_phase_to_model(p) for p in market_phases(close)]
+
+    ciclos_halving = None
+    if asset == "BTC":
+        hc = halving_cycles(close)
+        ciclos_halving = HalvingCyclesInfo(
+            ciclos=[_halving_cycle_to_model(c) for c in hc["ciclos"]],
+            n_halvings_totales=hc["n_halvings_totales"],
+            n_halvings_con_datos=hc["n_halvings_con_datos"],
+        )
+
+    heatmap = monthly_yearly_heatmap(returns)
+    heatmap_mensual = MonthlyYearlyHeatmap(anios=heatmap["anios"], matriz=heatmap["matriz"])
 
     return StatsResponse(
         asset=asset,
@@ -763,10 +810,13 @@ def get_stats(asset: str, interval: str = "1d") -> StatsResponse:
         estacionalidad_semanal=weekly,
         estacionalidad_horaria=hourly,
         autocorrelacion=autocorrelacion,
-        periodograma=periodograma,
         adf_precio=AdfResult(**adf_test(close)),
         adf_retornos=AdfResult(**adf_test(returns)),
         halvings_btc=list(BTC_HALVING_DATES) if asset == "BTC" else None,
+        drawdowns=drawdowns,
+        fases_mercado=fases_mercado,
+        ciclos_halving=ciclos_halving,
+        heatmap_mensual=heatmap_mensual,
     )
 
 

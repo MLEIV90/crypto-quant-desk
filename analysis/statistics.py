@@ -167,7 +167,16 @@ def autocorrelation(returns: pd.Series, lags: int = DEFAULT_ACF_LAGS) -> pd.Data
 def spectral_periodogram(
     returns: pd.Series, periods_per_day: float = 1.0, top_n: int = DEFAULT_PERIODOGRAM_TOP_N
 ) -> dict:
-    """Periodograma de Welch de los retornos (`scipy.signal.welch`, no
+    """DEPRECADA (Fase 15a): ya NO se expone en `GET /api/stats` ni en la
+    vista "Ciclos y Estadística" del frontend. Sobre retornos DIARIOS, el
+    período dominante que devolvía eran 2-3 días — ruido de alta
+    frecuencia, sin ningún significado de mercado, no un hallazgo útil.
+    Se reemplazó por `analysis/cycles.py` (drawdowns, fases bull/bear,
+    ciclos de halving), que sí mide ciclos con significado reconocible.
+    Esta función se deja acá tal cual (sigue funcionando, sigue testeada)
+    por si hiciera falta en el futuro, pero no la use código nuevo.
+
+    Periodograma de Welch de los retornos (`scipy.signal.welch`, no
     reimplementa la FFT ni el promediado de segmentos) — busca ciclos
     periódicos en la serie.
 

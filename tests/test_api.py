@@ -493,8 +493,8 @@ def test_get_stats_daily_returns_expected_structure() -> None:
     assert body["autocorrelacion"][0]["lag"] == 0
     assert body["autocorrelacion"][0]["acf_retornos"] == pytest.approx(1.0)
 
-    assert "top_periodos" in body["periodograma"]
-    assert len(body["periodograma"]["frecuencias"]) == len(body["periodograma"]["potencia"])
+    # Fase 15a: el periodograma ya NO forma parte de la respuesta.
+    assert "periodograma" not in body
 
     for adf_key in ("adf_precio", "adf_retornos"):
         assert set(body[adf_key].keys()) == {
@@ -507,6 +507,32 @@ def test_get_stats_daily_returns_expected_structure() -> None:
 
     # BTC: fechas de halving incluidas.
     assert body["halvings_btc"] == ["2012-11-28", "2016-07-09", "2020-05-11", "2024-04-20"]
+
+    # Fase 15a: drawdowns históricos, ordenados del más profundo al menos profundo.
+    assert len(body["drawdowns"]) > 0
+    profundidades = [d["profundidad_pct"] for d in body["drawdowns"]]
+    assert profundidades == sorted(profundidades)
+    assert all(p <= 0 for p in profundidades)
+    primer_dd = body["drawdowns"][0]
+    assert set(primer_dd.keys()) == {
+        "fecha_pico", "fecha_fondo", "profundidad_pct", "fecha_recuperacion", "dias_caida", "dias_recuperacion",
+    }
+
+    # Fase 15a: fases de mercado bull/bear.
+    assert len(body["fases_mercado"]) > 0
+    assert all(f["tipo"] in ("bull", "bear") for f in body["fases_mercado"])
+    assert body["fases_mercado"][-1]["confirmada"] is False  # la más reciente siempre queda "en curso"
+
+    # Fase 15a: BTC tiene ciclos de halving, con el caveat de n chico.
+    assert body["ciclos_halving"] is not None
+    assert body["ciclos_halving"]["n_halvings_totales"] == 4
+    assert body["ciclos_halving"]["n_halvings_con_datos"] <= 4
+    assert len(body["ciclos_halving"]["ciclos"]) == body["ciclos_halving"]["n_halvings_con_datos"]
+
+    # Fase 15a: heatmap mes x año.
+    assert len(body["heatmap_mensual"]["matriz"]) == 12
+    assert len(body["heatmap_mensual"]["anios"]) > 0
+    assert len(body["heatmap_mensual"]["matriz"][0]) == len(body["heatmap_mensual"]["anios"])
 
 
 def test_get_stats_hourly_includes_hourly_seasonality() -> None:
@@ -524,7 +550,9 @@ def test_get_stats_non_btc_asset_has_no_halvings() -> None:
     response = client.get("/api/stats", params={"asset": "ETH", "interval": "1d"})
 
     assert response.status_code == 200
-    assert response.json()["halvings_btc"] is None
+    body = response.json()
+    assert body["halvings_btc"] is None
+    assert body["ciclos_halving"] is None
 
 
 def test_get_stats_unknown_asset_returns_404() -> None:

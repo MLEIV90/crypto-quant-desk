@@ -150,17 +150,6 @@ export interface AutocorrelationPoint {
   acf_retornos2: number | null;
 }
 
-export interface PeriodogramTopPeriod {
-  periodo_dias: number;
-  potencia: number;
-}
-
-export interface PeriodogramResponse {
-  frecuencias: number[];
-  potencia: (number | null)[];
-  top_periodos: PeriodogramTopPeriod[];
-}
-
 export interface AdfResult {
   estadistico: number;
   p_valor: number;
@@ -170,6 +159,44 @@ export interface AdfResult {
   es_estacionaria: boolean;
 }
 
+export interface DrawdownEpisode {
+  fecha_pico: string;
+  fecha_fondo: string;
+  profundidad_pct: number;
+  fecha_recuperacion: string | null;
+  dias_caida: number;
+  dias_recuperacion: number | null;
+}
+
+export interface MarketPhase {
+  tipo: "bull" | "bear";
+  fecha_inicio: string;
+  fecha_fin: string;
+  duracion_dias: number;
+  retorno_pct: number;
+  confirmada: boolean;
+}
+
+export interface HalvingCycle {
+  fecha_inicio: string;
+  fecha_fin: string;
+  en_curso: boolean;
+  duracion_dias: number;
+  retorno_pct: number;
+  drawdown_maximo_pct: number;
+}
+
+export interface HalvingCyclesInfo {
+  ciclos: HalvingCycle[];
+  n_halvings_totales: number;
+  n_halvings_con_datos: number;
+}
+
+export interface MonthlyYearlyHeatmap {
+  anios: number[];
+  matriz: (number | null)[][];
+}
+
 export interface StatsResponse {
   asset: string;
   interval: string;
@@ -177,10 +204,13 @@ export interface StatsResponse {
   estacionalidad_semanal: SeasonalityBucket[];
   estacionalidad_horaria: SeasonalityBucket[] | null;
   autocorrelacion: AutocorrelationPoint[];
-  periodograma: PeriodogramResponse;
   adf_precio: AdfResult;
   adf_retornos: AdfResult;
   halvings_btc: string[] | null;
+  drawdowns: DrawdownEpisode[];
+  fases_mercado: MarketPhase[];
+  ciclos_halving: HalvingCyclesInfo | null;
+  heatmap_mensual: MonthlyYearlyHeatmap;
 }
 
 export interface CompareResponse {

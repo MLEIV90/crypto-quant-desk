@@ -1125,7 +1125,7 @@
 }
 
 /* ---------------------------------------------------------------------
-   Vista Estadística (Fase 11)
+   Vista Ciclos y Estadística (Fase 11, rehecha en Fase 15a)
    --------------------------------------------------------------------- */
 
 .stats-section {
@@ -1154,37 +1154,9 @@
   gap: var(--space-4);
 }
 
-.stats-periods-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.stats-periods-list__row {
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-}
-
-.stats-periods-list__row strong {
-  color: var(--color-text);
-}
-
-.stats-halvings-list {
-  margin: var(--space-2) 0 0;
-  padding-left: 1.1em;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  color: var(--color-text);
-  font-size: 0.85rem;
+.stats-heatmap-wrapper {
+  max-width: 900px;
+  overflow-x: auto;
 }
 
 /* ---------------------------------------------------------------------
