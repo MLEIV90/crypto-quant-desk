@@ -30,6 +30,7 @@ import {
   ARBITRAGE_CONCEPTS_HELP,
   ARBITRAGE_INTRO_HELP,
   ARBITRAGE_NOT_OPERABLE_WARNING,
+  ARBITRAGE_PAIR_BACKTEST_FLAT_PERIODS_NOTE,
   ARBITRAGE_PAIR_BACKTEST_HELP,
   ARBITRAGE_PAIR_BACKTEST_NOT_OPERABLE_WARNING,
   ARBITRAGE_SCATTER_HELP,
@@ -365,6 +366,7 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
             <MetricCard label="Cantidad de operaciones" value={detail.backtest.metrics.n_trades} />
           </div>
           <LineChartPanel series={backtestEquitySeries} height={280} />
+          <p className="view-note">{ARBITRAGE_PAIR_BACKTEST_FLAT_PERIODS_NOTE}</p>
         </>
       )}
     </section>

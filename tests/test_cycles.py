@@ -81,9 +81,12 @@ def test_market_phases_confirms_bear_then_bull_with_real_extremes() -> None:
     # desde el pico real, 125, con el FONDO real en 80 -- no en 90, que es
     # solo donde se cruzó -20% por primera vez) -> 100 (deja un tramo
     # alcista final, todavía sin confirmar otro 20%, "en curso").
+    # min_duration_days=0 desactiva el filtro de fusión de fases cortas
+    # (Fase 16a): esta serie sintética tiene fases de pocos días y lo que se
+    # quiere probar acá es la lógica de extremos reales, no el filtro.
     close = _series([100, 110, 125, 90, 80, 100])
 
-    phases = market_phases(close, threshold=0.20)
+    phases = market_phases(close, threshold=0.20, min_duration_days=0)
 
     assert len(phases) == 3
 
@@ -113,9 +116,11 @@ def test_market_phases_last_phase_is_unconfirmed_if_threshold_not_crossed_again(
     # sube un poco pero NUNCA llega a +20% desde el fondo -- toda la serie
     # queda como UNA sola fase bear "en curso" (nunca se confirma un
     # reversal opuesto), no se corta en el momento en que cruzó -20%.
+    # min_duration_days=0: idem nota anterior, esta serie es demasiado corta
+    # para el default de 30 días y no es lo que este test quiere ejercitar.
     close = _series([100, 90, 70, 75, 78])
 
-    phases = market_phases(close, threshold=0.20)
+    phases = market_phases(close, threshold=0.20, min_duration_days=0)
 
     assert len(phases) == 1
     assert phases[-1]["confirmada"] is False
@@ -133,6 +138,119 @@ def test_market_phases_no_move_crosses_threshold_returns_empty() -> None:
 def test_market_phases_empty_or_single_point_returns_empty() -> None:
     assert market_phases(pd.Series(dtype=float)) == []
     assert market_phases(_series([100])) == []
+
+
+# --------------------------------------------------------------------------
+# market_phases -- filtro de duración mínima (Fase 16a)
+# --------------------------------------------------------------------------
+
+
+def test_market_phases_min_duration_days_zero_disables_filter() -> None:
+    # Con el umbral de 20% de por sí ya salen fases cortas (whipsaws). Con
+    # min_duration_days=0 el filtro queda desactivado y se devuelven las
+    # fases crudas, sin fusionar -- esto es lo que usaban los tests
+    # anteriores a Fase 16a.
+    close = _series([100, 110, 125, 90, 80, 100])
+    raw = market_phases(close, threshold=0.20, min_duration_days=0)
+    assert len(raw) == 3  # las 3 fases crudas, sin fusionar (ver test de extremos reales)
+    assert raw == market_phases(close, threshold=0.20, min_duration_days=-1)
+
+
+def test_market_phases_merges_short_middle_phase_into_same_type_neighbors() -> None:
+    # bull largo (40d, +30%) -> bear CORTO (5d, -23%, un whipsaw) -> bull
+    # largo sin confirmar (45d, +40%). El bear corto no llega a los 30 días
+    # por defecto, así que se fusiona con sus dos vecinos (ambos "bull",
+    # necesariamente del mismo tipo porque las fases alternan) en una única
+    # fase bull que cubre toda la serie, con retorno recalculado a partir de
+    # los precios reales de los extremos combinados (100 -> 140), no de un
+    # promedio o concatenación de los retornos originales.
+    seg1 = list(np.linspace(100, 130, 41))
+    seg2 = list(np.linspace(130, 100, 6))[1:]
+    seg3 = list(np.linspace(100, 140, 46))[1:]
+    close = _series(seg1 + seg2 + seg3)
+
+    raw = market_phases(close, min_duration_days=0)
+    assert [p["tipo"] for p in raw] == ["bull", "bear", "bull"]
+    assert raw[1]["duracion_dias"] == 5  # el whipsaw que se va a fusionar
+
+    filtered = market_phases(close)  # default min_duration_days=30
+
+    assert len(filtered) == 1
+    merged = filtered[0]
+    assert merged["tipo"] == "bull"
+    assert merged["fecha_inicio"] == close.index[0]
+    assert merged["fecha_fin"] == close.index[-1]
+    assert merged["duracion_dias"] == 90
+    assert merged["retorno_pct"] == pytest.approx(40.0)
+    assert merged["confirmada"] is False  # hereda el estado del último tramo
+
+
+def test_market_phases_merges_short_first_phase_into_next_neighbor() -> None:
+    # bull CORTO (5d, +25%) seguido de un bear largo sin confirmar (55d,
+    # -28%). Al ser la primera fase, se fusiona con su único vecino: el tipo
+    # resultante es el del vecino (bear) y su inicio se extiende para cubrir
+    # también el tramo corto descartado.
+    seg1 = list(np.linspace(100, 125, 6))
+    seg2 = list(np.linspace(125, 90, 56))[1:]
+    close = _series(seg1 + seg2)
+
+    raw = market_phases(close, min_duration_days=0)
+    assert [p["tipo"] for p in raw] == ["bull", "bear"]
+    assert raw[0]["duracion_dias"] == 5
+
+    filtered = market_phases(close)
+
+    assert len(filtered) == 1
+    merged = filtered[0]
+    assert merged["tipo"] == "bear"
+    assert merged["fecha_inicio"] == close.index[0]
+    assert merged["fecha_fin"] == close.index[-1]
+    assert merged["duracion_dias"] == 60
+    assert merged["retorno_pct"] == pytest.approx(-10.0)  # 90/100 - 1, no -28% ni un promedio
+    assert merged["confirmada"] is False
+
+
+def test_market_phases_merges_short_last_phase_into_previous_neighbor() -> None:
+    # bull largo confirmado (60d, +30%) seguido de un bear CORTO sin
+    # confirmar (5d, -22%). Al ser la última fase, se fusiona con su único
+    # vecino: el tipo resultante es el del vecino (bull) y su fin se
+    # extiende para cubrir también el tramo corto descartado.
+    seg1 = list(np.linspace(100, 130, 61))
+    seg2 = list(np.linspace(130, 101, 6))[1:]
+    close = _series(seg1 + seg2)
+
+    raw = market_phases(close, min_duration_days=0)
+    assert [p["tipo"] for p in raw] == ["bull", "bear"]
+    assert raw[1]["duracion_dias"] == 5
+
+    filtered = market_phases(close)
+
+    assert len(filtered) == 1
+    merged = filtered[0]
+    assert merged["tipo"] == "bull"
+    assert merged["fecha_inicio"] == close.index[0]
+    assert merged["fecha_fin"] == close.index[-1]
+    assert merged["duracion_dias"] == 65
+    assert merged["retorno_pct"] == pytest.approx(1.0)  # 101/100 - 1, no +30% ni un promedio
+    assert merged["confirmada"] is False  # hereda el estado del tramo corto absorbido
+
+
+def test_market_phases_default_min_duration_all_phases_meet_minimum() -> None:
+    # Sanity check con datos reales: cualquier fase que sobreviva el filtro
+    # por defecto (30 días) debe cumplir la duración mínima, alternar
+    # tipo bull/bear y mantener continuidad cronológica (el fin de una
+    # fase es el inicio de la siguiente).
+    rng = np.random.default_rng(16)
+    steps = rng.normal(loc=0.0005, scale=0.03, size=1200)
+    prices = 100 * np.exp(np.cumsum(steps))
+    close = _series(list(prices))
+
+    phases = market_phases(close)
+
+    assert len(phases) > 0
+    assert all(p["duracion_dias"] >= 30 for p in phases)
+    assert all(phases[i]["tipo"] != phases[i + 1]["tipo"] for i in range(len(phases) - 1))
+    assert all(phases[i]["fecha_fin"] == phases[i + 1]["fecha_inicio"] for i in range(len(phases) - 1))
 
 
 # --------------------------------------------------------------------------

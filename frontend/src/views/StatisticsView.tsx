@@ -108,10 +108,12 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
 
       {!errorMessage && stats && (
         <>
-          {/* ESTACIONALIDAD (día de semana / hora) */}
+          {/* ESTACIONALIDAD (día de semana / hora) — la mensual se ve en el
+              heatmap mes x año más abajo, no acá (Fase 16a: el título lo
+              deja explícito para que no parezca que falta el gráfico). */}
           <div className="stats-section">
             <h3 className="stats-section__title">
-              Estacionalidad
+              Estacionalidad semanal{stats.estacionalidad_horaria ? " y horaria" : ""}
               <InfoTooltip text={SEASONALITY_HELP.weekday} />
             </h3>
             <div className="stats-grid">

@@ -116,9 +116,10 @@ export const STATS_INTRO_HELP =
 
 export const SEASONALITY_HELP = {
   weekday:
-    "Retorno promedio histórico agrupando por día de la semana. A diferencia de las acciones, cripto opera " +
-    "los 7 días — no hay 'efecto fin de semana' por falta de mercado abierto. Patrón débil e inestable, no " +
-    "una regla operable.",
+    "Retorno promedio histórico agrupando por día de la semana (y por hora UTC, si el timeframe es horario). " +
+    "A diferencia de las acciones, cripto opera los 7 días — no hay 'efecto fin de semana' por falta de " +
+    "mercado abierto. Patrón débil e inestable, no una regla operable. La estacionalidad MENSUAL está más " +
+    "abajo, en el mapa de calor mes x año — ahí se ve año por año, no como un promedio único.",
 };
 
 export const STATIONARITY_HELP =
@@ -292,3 +293,8 @@ export const ARBITRAGE_PAIR_BACKTEST_NOT_OPERABLE_WARNING =
   "es a propósito: sobre un par que NO está establemente cointegrado, lo ESPERABLE es que el backtest " +
   "muestre pérdidas, un Sharpe pobre, o un resultado que no se sostiene. Verlo acá es para CONFIRMAR " +
   "cuantitativamente que el par no es operable, no una sugerencia de que valga la pena operarlo igual.";
+
+export const ARBITRAGE_PAIR_BACKTEST_FLAT_PERIODS_NOTE =
+  "Los tramos planos en la curva de equity son períodos SIN operaciones (el z-score del spread no cruzó los " +
+  "umbrales de entrada/salida) — es el comportamiento correcto de la estrategia, no un cuelgue ni un error de " +
+  "datos: mientras el spread se mueve cerca de su media, no hay señal para entrar.";

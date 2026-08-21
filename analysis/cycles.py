@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DRAWDOWN_TOP_N: int = 10
 DEFAULT_PHASE_THRESHOLD: float = 0.20
+DEFAULT_MIN_PHASE_DURATION_DAYS: int = 30
 
 
 # --------------------------------------------------------------------------
@@ -126,7 +127,83 @@ def drawdown_analysis(close: pd.Series, top_n: int = DEFAULT_DRAWDOWN_TOP_N) -> 
 # --------------------------------------------------------------------------
 
 
-def market_phases(close: pd.Series, threshold: float = DEFAULT_PHASE_THRESHOLD) -> list[dict]:
+def _merge_two_adjacent(a: dict, b: dict, tipo: str) -> dict:
+    """Fusiona dos fases ADYACENTES y CONSECUTIVAS (`a` termina donde
+    empieza `b`) en una sola, con `tipo` explícito (lo decide quien llama —
+    ver `_merge_short_phases`). Recalcula "duracion_dias"/"retorno_pct" con
+    los precios reales de los extremos combinados (`precio_inicio`/
+    `precio_fin`, campos INTERNOS que no viajan en el dict final — ver
+    `market_phases`), no solo concatena los números de `a`/`b`.
+    """
+    return {
+        "tipo": tipo,
+        "fecha_inicio": a["fecha_inicio"],
+        "fecha_fin": b["fecha_fin"],
+        "precio_inicio": a["precio_inicio"],
+        "precio_fin": b["precio_fin"],
+        "duracion_dias": (b["fecha_fin"] - a["fecha_inicio"]).days,
+        "retorno_pct": (b["precio_fin"] / a["precio_inicio"] - 1.0) * 100.0 if a["precio_inicio"] != 0 else 0.0,
+        # El extremo más reciente domina: si `b` todavía está "en curso",
+        # la fase combinada también lo está.
+        "confirmada": b["confirmada"],
+    }
+
+
+def _merge_short_phases(phases: list[dict], min_duration_days: int) -> list[dict]:
+    """Fusiona/descarta micro-fases más cortas que `min_duration_days`
+    (Fase 16a) — con el umbral de 20% de `market_phases` es común que
+    salgan varias fases de 5-7 días (whipsaws) que no representan un
+    movimiento de mercado significativo, solo ruido alrededor del umbral.
+
+    Algoritmo (voraz, determinístico): mientras quede más de una fase y la
+    MÁS CORTA de todas no llegue a `min_duration_days`, se la fusiona con
+    su(s) vecina(s):
+    - Si es la primera o la última fase: se fusiona con su único vecino,
+      que ABSORBE el tramo corto (el tipo del resultado es el del vecino,
+      solo se extiende su fecha de inicio o fin para cubrir también el
+      tramo descartado).
+    - Si es una fase intermedia: sus DOS vecinas son necesariamente del
+      MISMO tipo (bull/bear alternan por construcción), así que fusionar
+      las tres en una sola de ese tipo compartido es la única fusión
+      posible sin inventar un tipo nuevo.
+
+    Cada fusión recalcula duración/retorno con los precios reales de los
+    extremos combinados (`_merge_two_adjacent`), no promedia ni concatena
+    los números de las fases originales. Termina cuando queda una sola
+    fase o cuando la más corta restante ya cumple `min_duration_days` —
+    si TODA la historia es más corta que `min_duration_days`, devuelve esa
+    única fase igual (no hay con qué fusionarla).
+    """
+    if min_duration_days <= 0:
+        return phases
+
+    merged = list(phases)
+    while len(merged) > 1:
+        idx = min(range(len(merged)), key=lambda i: merged[i]["duracion_dias"])
+        if merged[idx]["duracion_dias"] >= min_duration_days:
+            break
+
+        if idx == 0:
+            merged[1] = _merge_two_adjacent(merged[0], merged[1], tipo=merged[1]["tipo"])
+            del merged[0]
+        elif idx == len(merged) - 1:
+            merged[idx - 1] = _merge_two_adjacent(merged[idx - 1], merged[idx], tipo=merged[idx - 1]["tipo"])
+            del merged[idx]
+        else:
+            shared_tipo = merged[idx - 1]["tipo"]
+            combined = _merge_two_adjacent(merged[idx - 1], merged[idx], tipo=shared_tipo)
+            combined = _merge_two_adjacent(combined, merged[idx + 1], tipo=shared_tipo)
+            merged[idx - 1] = combined
+            del merged[idx : idx + 2]
+
+    return merged
+
+
+def market_phases(
+    close: pd.Series,
+    threshold: float = DEFAULT_PHASE_THRESHOLD,
+    min_duration_days: int = DEFAULT_MIN_PHASE_DURATION_DAYS,
+) -> list[dict]:
     """Fases bull/bear delimitadas por una regla clara: un mercado entra en
     BEAR cuando cae `threshold` (20% por defecto) o más desde un máximo, y
     entra en BULL cuando sube `threshold` o más desde un mínimo — la misma
@@ -149,6 +226,16 @@ def market_phases(close: pd.Series, threshold: float = DEFAULT_PHASE_THRESHOLD) 
     extremo confirmado hasta el último dato disponible, aunque todavía no
     haya cruzado el umbral — para no esconder el tramo más reciente. Si en
     TODA la serie nunca se cruzó `threshold` ni una vez, devuelve `[]`.
+
+    `min_duration_days` (Fase 16a, default 30): con `threshold=0.20` es
+    común que salgan varias fases de 5-7 días — un rebote o una caída que
+    apenas cruzó el 20% antes de revertirse de nuevo, un "whipsaw" sin
+    significado de mercado real, no un cambio de régimen. Por debajo de
+    esta duración, la fase se FUSIONA con sus vecinas en vez de mostrarse
+    suelta (ver `_merge_short_phases` para el algoritmo exacto) — el
+    resultado final son fases más largas y más representativas, a costa de
+    perder el detalle de los whipsaws que se fusionaron. `min_duration_days
+    <= 0` desactiva el filtro (se devuelven las fases crudas del umbral).
     """
     c = close.dropna()
     n = len(c)
@@ -164,6 +251,8 @@ def market_phases(close: pd.Series, threshold: float = DEFAULT_PHASE_THRESHOLD) 
             "tipo": kind,
             "fecha_inicio": dates[start_pos],
             "fecha_fin": dates[end_pos],
+            "precio_inicio": start_price,
+            "precio_fin": end_price,
             "duracion_dias": (dates[end_pos] - dates[start_pos]).days,
             "retorno_pct": (end_price / start_price - 1.0) * 100.0 if start_price != 0 else 0.0,
             "confirmada": confirmada,
@@ -213,6 +302,10 @@ def market_phases(close: pd.Series, threshold: float = DEFAULT_PHASE_THRESHOLD) 
     elif state == "up":
         phases.append(_phase("bull", trough_pos, n - 1, confirmada=False))
 
+    phases = _merge_short_phases(phases, min_duration_days)
+    for phase in phases:
+        del phase["precio_inicio"]
+        del phase["precio_fin"]
     return phases
 
 
