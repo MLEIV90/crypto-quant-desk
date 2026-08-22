@@ -18,3 +18,14 @@ fastapi>=0.110
 uvicorn>=0.29
 httpx>=0.27
 reportlab>=4.0
+
+# Fase 18 (experimento de investigación, Deep RL para asignación de
+# cartera — ver rl/). PESO: torch instala una wheel de ~120-700MB según
+# plataforma (CPU-only en este proyecto, no se pidió CUDA) — es, con
+# diferencia, la dependencia más pesada del repo. Si el tamaño de la
+# instalación es un problema (CI, disco, contenedores chicos), estas tres
+# líneas son las únicas que dependen de eso; el resto de la app (API,
+# frontend, ML supervisado, GARCH, backtests) funciona sin ellas.
+gymnasium>=0.29
+stable-baselines3>=2.3
+torch>=2.2

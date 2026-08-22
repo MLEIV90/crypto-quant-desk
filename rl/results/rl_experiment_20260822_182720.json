@@ -1,0 +1,142 @@
+{
+  "params": {
+    "assets": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "BNB",
+      "LTC"
+    ],
+    "min_train_days": 730,
+    "n_blocks": 4,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "total_timesteps": 30000,
+    "cost_bps": 10.0
+  },
+  "elapsed_seconds": 944.8179457187653,
+  "n_ppo_runs": 20,
+  "oos_date_range": [
+    "2022-08-31 00:00:00+00:00",
+    "2026-08-11 00:00:00+00:00"
+  ],
+  "blocks": [
+    {
+      "train_start": 0,
+      "train_end": 730,
+      "test_start": 730,
+      "test_end": 1090
+    },
+    {
+      "train_start": 0,
+      "train_end": 1090,
+      "test_start": 1090,
+      "test_end": 1450
+    },
+    {
+      "train_start": 0,
+      "train_end": 1450,
+      "test_start": 1450,
+      "test_end": 1810
+    },
+    {
+      "train_start": 0,
+      "train_end": 1810,
+      "test_start": 1810,
+      "test_end": 2172
+    }
+  ],
+  "summary_table": [
+    {
+      "estrategia": "RL (PPO)",
+      "sharpe_media": 0.6758432699887195,
+      "retorno_anualizado_media": 0.24307220979216465,
+      "retorno_total_media": 1.3968175024144318,
+      "max_drawdown_media": -0.5704652557187047,
+      "turnover_total_media": 362.12936955962175,
+      "turnover_medio_diario_media": 0.25112993728129107,
+      "sharpe_std": 0.10325509719075605,
+      "retorno_anualizado_std": 0.0690948518065231,
+      "retorno_total_std": 0.5391655934617493,
+      "max_drawdown_std": 0.07088660689323309,
+      "turnover_total_std": 207.90330008242015,
+      "turnover_medio_diario_std": 0.14417704582692104
+    },
+    {
+      "estrategia": "Asignador aleatorio",
+      "sharpe_media": 0.32222207816543547,
+      "retorno_anualizado_media": 0.0427456599956584,
+      "retorno_total_media": 0.21378623541580827,
+      "max_drawdown_media": -0.6207751838369505,
+      "turnover_total_media": 642.9802749673275,
+      "turnover_medio_diario_media": 0.4458947815307403,
+      "sharpe_std": 0.17179317720687728,
+      "retorno_anualizado_std": 0.08323248001443792,
+      "retorno_total_std": 0.3505307689190062,
+      "max_drawdown_std": 0.02929437886931907,
+      "turnover_total_std": 8.910708674597526,
+      "turnover_medio_diario_std": 0.006179409621773605
+    },
+    {
+      "estrategia": "buy_hold_equiponderado",
+      "sharpe_media": 0.6550014061307827,
+      "retorno_anualizado_media": 0.23211781080246507,
+      "retorno_total_media": 1.2810689921185392,
+      "max_drawdown_media": -0.6200129544413282,
+      "turnover_total_media": 1.0,
+      "turnover_medio_diario_media": 0.0006934812760055479,
+      "sharpe_std": 0.0,
+      "retorno_anualizado_std": 0.0,
+      "retorno_total_std": 0.0,
+      "max_drawdown_std": 0.0,
+      "turnover_total_std": 0.0,
+      "turnover_medio_diario_std": 0.0
+    },
+    {
+      "estrategia": "buy_hold_btc",
+      "sharpe_media": 0.852700342676999,
+      "retorno_anualizado_media": 0.33839077873290724,
+      "retorno_total_media": 2.162927934475927,
+      "max_drawdown_media": -0.5297176574912453,
+      "turnover_total_media": 1.0,
+      "turnover_medio_diario_media": 0.0006934812760055479,
+      "sharpe_std": 0.0,
+      "retorno_anualizado_std": 0.0,
+      "retorno_total_std": 0.0,
+      "max_drawdown_std": 0.0,
+      "turnover_total_std": 0.0,
+      "turnover_medio_diario_std": 0.0
+    },
+    {
+      "estrategia": "vol_targeting",
+      "sharpe_media": 0.6018251999449038,
+      "retorno_anualizado_media": 0.10597193549228434,
+      "retorno_total_media": 0.4887411171086462,
+      "max_drawdown_media": -0.23430911100266816,
+      "turnover_total_media": 91.83398680317403,
+      "turnover_medio_diario_media": 0.06368515034894176,
+      "sharpe_std": 0.0,
+      "retorno_anualizado_std": 0.0,
+      "retorno_total_std": 0.0,
+      "max_drawdown_std": 0.0,
+      "turnover_total_std": 0.0,
+      "turnover_medio_diario_std": 0.0
+    }
+  ],
+  "conclusion": {
+    "supera_a_todos_los_baselines_consistentemente": false,
+    "sharpe_rl_peor_semilla": 0.572153880361795,
+    "sharpe_rl_mejor_semilla": 0.7901177503103128,
+    "sharpe_baselines": {
+      "buy_hold_equiponderado": 0.6550014061307827,
+      "buy_hold_btc": 0.852700342676999,
+      "vol_targeting": 0.6018251999449038,
+      "asignador_aleatorio (media)": 0.32222207816543547
+    }
+  }
+}
