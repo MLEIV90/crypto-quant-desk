@@ -291,6 +291,45 @@ def test_get_risk_unknown_asset_returns_404() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/risk-summary (Fase 20b) — rápido a propósito (sin GARCH, ver
+# api/main.py::get_risk_summary), así que no hace falta el mismo cuidado de
+# "test lento" que /api/risk.
+# --------------------------------------------------------------------------
+
+
+def test_get_risk_summary_returns_one_row_per_asset() -> None:
+    response = client.get("/api/risk-summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    filas = body["filas"]
+    assert [fila["asset"] for fila in filas] == ["BTC", "ETH", "SOL", "BNB", "LTC"]
+
+    for fila in filas:
+        assert fila["vol_realizada"] > 0
+        assert fila["var95"] > 0
+        assert fila["regimen"] in {"calma", "normal", "tension", None}
+        for percentil_key in ("vol_realizada_percentil", "var95_percentil"):
+            value = fila[percentil_key]
+            assert value is None or 0.0 <= value <= 100.0
+        # Fase 20b: a propósito NO expone vol_garch (ver docstring del endpoint).
+        assert "vol_garch" not in fila
+
+
+def test_get_risk_summary_is_fast_without_garch(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Si alguien reintroduce un ajuste GARCH acá por error, este test lo
+    # detecta: select_best_model NUNCA debería llamarse desde este endpoint.
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("get_risk_summary no debería ajustar un modelo GARCH (ver su docstring)")
+
+    monkeypatch.setattr(api_main, "select_best_model", fail_if_called)
+
+    response = client.get("/api/risk-summary")
+
+    assert response.status_code == 200
+
+
+# --------------------------------------------------------------------------
 # /api/backtest
 # --------------------------------------------------------------------------
 
@@ -1051,4 +1090,5 @@ def test_docs_and_openapi_schema_are_available() -> None:
         "/api/data-status", "/api/refresh", "/api/stats", "/api/compare",
         "/api/pairs/screening", "/api/pairs/detail", "/api/volume-profile", "/api/correlation",
         "/api/report", "/api/export/ohlcv", "/api/export/drawdowns", "/api/export/correlation",
+        "/api/risk-summary",
     }

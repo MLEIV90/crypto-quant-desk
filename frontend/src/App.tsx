@@ -101,7 +101,7 @@ function Dashboard() {
       {activeView === "tecnico" && (
         <TechnicalAnalysisView asset={asset} interval={interval} assets={assets} onAlertTriggered={handleAlertTriggered} />
       )}
-      {activeView === "riesgo" && <RiskView asset={asset} />}
+      {activeView === "riesgo" && <RiskView asset={asset} onAssetChange={setAsset} />}
       {activeView === "backtest" && <BacktestView asset={asset} />}
       {activeView === "research" && <ResearchView asset={asset} />}
       {activeView === "estadistica" && <StatisticsView asset={asset} interval={interval} />}

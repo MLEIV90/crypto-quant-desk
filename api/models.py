@@ -167,6 +167,43 @@ class RiskResponse(BaseModel):
     histograma: ReturnHistogram
 
 
+class RiskSummaryRow(BaseModel):
+    """Fila de `GET /api/risk-summary` (Fase 20b) para UNA moneda.
+
+    A propósito NO incluye `vol_garch`: este endpoint evalúa las 5 monedas
+    de `config.UNIVERSE` en una sola respuesta, y ajustar un modelo GARCH
+    por activo (como hace `GET /api/risk`) sería demasiado lento para una
+    tabla comparativa pensada para cargar de un vistazo, sin un botón
+    explícito de por medio (ver el docstring de `get_risk_summary`).
+    `regimen` se calcula IGUAL que en `GET /api/risk`
+    (`models.garch.volatility_regime`, reutilizada tal cual), pero sobre la
+    volatilidad REALIZADA en vez de la condicional GARCH — mismo tipo de
+    magnitud (decimal, anualizada), así que la clasificación calma/normal/
+    tensión sigue siendo válida, solo que más rápida de calcular y algo
+    menos sensible a cambios recientes que la versión GARCH de la vista
+    detallada de un solo activo.
+    """
+
+    asset: str
+    vol_realizada: float = Field(description="Volatilidad realizada anualizada (rolling)")
+    vol_realizada_percentil: float | None = Field(description="Percentil histórico de vol_realizada, 0-100")
+    regimen: str | None = Field(
+        description='"calma"/"normal"/"tension" según la volatilidad REALIZADA (no GARCH, ver arriba), o null'
+    )
+    var95: float = Field(description="Value at Risk histórico al 95% (pérdida positiva)")
+    var95_percentil: float | None = Field(description="Percentil histórico de var95 (ventana móvil de 1 año), 0-100")
+    ultima_fecha: datetime
+
+
+class RiskSummaryResponse(BaseModel):
+    """Respuesta de `GET /api/risk-summary` (Fase 20b): comparación de
+    riesgo actual entre las 5 monedas de `config.UNIVERSE`, en el mismo
+    orden que ese diccionario.
+    """
+
+    filas: list[RiskSummaryRow]
+
+
 class EquityPoint(BaseModel):
     """Un punto de una curva de equity (base 1.0)."""
 

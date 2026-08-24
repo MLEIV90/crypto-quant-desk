@@ -114,6 +114,20 @@ export interface RiskResponse {
   histograma: ReturnHistogram;
 }
 
+export interface RiskSummaryRow {
+  asset: string;
+  vol_realizada: number;
+  vol_realizada_percentil: number | null;
+  regimen: "calma" | "normal" | "tension" | null;
+  var95: number;
+  var95_percentil: number | null;
+  ultima_fecha: string;
+}
+
+export interface RiskSummaryResponse {
+  filas: RiskSummaryRow[];
+}
+
 export interface EquityPoint {
   fecha: string;
   valor: number;

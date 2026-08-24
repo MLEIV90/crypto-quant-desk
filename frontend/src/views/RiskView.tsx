@@ -17,12 +17,14 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, getGarchSeries, getOhlcv, getOhlcvCsv, getRisk } from "../api";
+import { ApiError, getBacktest, getGarchSeries, getOhlcv, getOhlcvCsv, getRisk, getRiskSummary } from "../api";
 import { CsvDownloadButton } from "../components/CsvDownloadButton";
+import { InfoTooltip } from "../components/InfoTooltip";
 import { LineChartPanel } from "../components/LineChartPanel";
 import { MetricCard } from "../components/MetricCard";
 import { candleLimitForPeriod, PeriodSelector, type PeriodKey } from "../components/PeriodSelector";
 import { RegimeStrip } from "../components/RegimeStrip";
+import { RiskSummaryTable } from "../components/RiskSummaryTable";
 import { ReturnHistogramChart } from "../components/ReturnHistogramChart";
 import { StatusMessage } from "../components/StatusMessage";
 import {
@@ -31,6 +33,8 @@ import {
   RISK_METRIC_HELP,
   RISK_PERCENTILE_HELP,
   RISK_REGIME_STRIP_HELP,
+  RISK_SUMMARY_HELP,
+  RISK_VOL_TARGETING_HELP,
 } from "../helpTexts";
 import { COLORS, DIRECTION_COLORS, REGIME_COLORS } from "../theme";
 
@@ -54,9 +58,10 @@ function percentileDescriptor(percentile: number | null): { text: string; color?
 
 interface RiskViewProps {
   asset: string;
+  onAssetChange: (asset: string) => void;
 }
 
-export function RiskView({ asset }: RiskViewProps) {
+export function RiskView({ asset, onAssetChange }: RiskViewProps) {
   const [pricePeriod, setPricePeriod] = useState<PeriodKey>("todo");
   const priceCandleLimit = candleLimitForPeriod(pricePeriod, RISK_INTERVAL);
 
@@ -66,10 +71,18 @@ export function RiskView({ asset }: RiskViewProps) {
     queryKey: ["ohlcv", asset, RISK_INTERVAL, "risk-view", priceCandleLimit],
     queryFn: () => getOhlcv(asset, RISK_INTERVAL, priceCandleLimit),
   });
+  // Fase 20b: sin `asset` en la queryKey a propósito — las 5 filas son
+  // siempre las mismas 5 monedas, no dependen de cuál está seleccionada;
+  // cambiar de activo (incluso haciendo clic en esta misma tabla) no debe
+  // disparar un refetch de esto.
+  const riskSummaryQuery = useQuery({ queryKey: ["risk-summary"], queryFn: getRiskSummary });
+  const backtestQuery = useQuery({ queryKey: ["backtest", asset], queryFn: () => getBacktest(asset) });
 
   const risk = riskQuery.data;
   const garch = garchQuery.data;
   const price = priceQuery.data;
+  const riskSummary = riskSummaryQuery.data;
+  const backtest = backtestQuery.data;
 
   const isLoading = riskQuery.isLoading || garchQuery.isLoading || priceQuery.isLoading;
   const error = riskQuery.error ?? garchQuery.error ?? priceQuery.error;
@@ -78,6 +91,20 @@ export function RiskView({ asset }: RiskViewProps) {
   return (
     <section className="view">
       <p className="view-note">{RISK_INTRO_HELP}</p>
+
+      <h3 className="panel-subtitle">
+        Riesgo actual de las 5 monedas
+        <InfoTooltip text={RISK_SUMMARY_HELP} />
+      </h3>
+      {riskSummaryQuery.isLoading && <StatusMessage kind="loading">Calculando riesgo de las 5 monedas…</StatusMessage>}
+      {riskSummaryQuery.error && (
+        <StatusMessage kind="error">
+          {riskSummaryQuery.error instanceof ApiError ? riskSummaryQuery.error.message : String(riskSummaryQuery.error)}
+        </StatusMessage>
+      )}
+      {riskSummary && (
+        <RiskSummaryTable filas={riskSummary.filas} activeAsset={asset} onSelectAsset={onAssetChange} />
+      )}
 
       {errorMessage && <StatusMessage kind="error">{errorMessage}</StatusMessage>}
       {!errorMessage && isLoading && (
@@ -146,6 +173,73 @@ export function RiskView({ asset }: RiskViewProps) {
             counts={risk.histograma.counts}
             var95Return={risk.histograma.var95_return}
             es95Return={risk.histograma.es95_return}
+          />
+        </>
+      )}
+
+      <h3 className="panel-subtitle">
+        El valor de gestionar el riesgo
+        <InfoTooltip text={RISK_VOL_TARGETING_HELP} />
+      </h3>
+      <p className="view-note">
+        El vol targeting no busca ganar más — busca sufrir menos: reduce el tamaño de la posición cuando el
+        activo está más volátil de lo normal, a costa de algo de retorno en los mercados alcistas.
+      </p>
+      {backtestQuery.isLoading && (
+        <StatusMessage kind="loading">Corriendo backtest de {asset} con y sin vol targeting…</StatusMessage>
+      )}
+      {backtestQuery.error && (
+        <StatusMessage kind="error">
+          {backtestQuery.error instanceof ApiError ? backtestQuery.error.message : String(backtestQuery.error)}
+        </StatusMessage>
+      )}
+      {backtest && (
+        <>
+          <div className="metric-grid">
+            <MetricCard
+              label="Máx. drawdown — buy & hold"
+              value={`${(backtest.metrics_buy_and_hold.max_drawdown * 100).toFixed(1)}%`}
+              valueColor={COLORS.danger}
+            />
+            <MetricCard
+              label="Máx. drawdown — con vol targeting"
+              value={`${(backtest.metrics_estrategia.max_drawdown * 100).toFixed(1)}%`}
+              valueColor={
+                backtest.metrics_estrategia.max_drawdown > backtest.metrics_buy_and_hold.max_drawdown
+                  ? COLORS.success
+                  : COLORS.danger
+              }
+            />
+            <MetricCard
+              label="Sharpe — buy & hold"
+              value={backtest.metrics_buy_and_hold.sharpe.toFixed(2)}
+            />
+            <MetricCard
+              label="Sharpe — con vol targeting"
+              value={backtest.metrics_estrategia.sharpe.toFixed(2)}
+              valueColor={
+                backtest.metrics_estrategia.sharpe >= backtest.metrics_buy_and_hold.sharpe
+                  ? COLORS.success
+                  : undefined
+              }
+            />
+          </div>
+          <LineChartPanel
+            series={[
+              {
+                id: "estrategia",
+                label: "Con vol targeting",
+                color: COLORS.equityStrategy,
+                data: backtest.equity_curve_estrategia.map((point) => ({ time: point.fecha, value: point.valor })),
+              },
+              {
+                id: "buy-hold",
+                label: "Buy & hold (sin vol targeting)",
+                color: COLORS.equityBuyHold,
+                data: backtest.equity_curve_buy_and_hold.map((point) => ({ time: point.fecha, value: point.valor })),
+              },
+            ]}
+            height={320}
           />
         </>
       )}

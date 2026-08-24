@@ -1326,6 +1326,38 @@
    Vista Arbitraje (Fase 12b)
    --------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------
+   Tabla de riesgo de las 5 monedas (Fase 20b, vista "Riesgo")
+   --------------------------------------------------------------------- */
+
+.risk-summary-table__row {
+  cursor: pointer;
+}
+
+.risk-summary-table__row--active {
+  background: var(--color-panel-background-elevated);
+}
+
+.risk-summary-table__row--active .risk-summary-table__asset {
+  color: var(--color-accent);
+}
+
+.risk-summary-table__asset {
+  font-weight: 700;
+}
+
+.risk-summary-table__percentil {
+  margin-left: 6px;
+  font-size: 0.72rem;
+  color: var(--color-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.risk-summary-table__regime {
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
 .pair-semaphore {
   display: inline-flex;
   align-items: center;

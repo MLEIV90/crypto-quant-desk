@@ -23,6 +23,7 @@ import type {
   PredictionResponse,
   RefreshResponse,
   RiskResponse,
+  RiskSummaryResponse,
   StatsResponse,
   StudiesResponse,
   SuggesterResponse,
@@ -154,6 +155,16 @@ export function getSuggester(asset: string, interval: string): Promise<Suggester
 /** Lento (ajusta un modelo GARCH) — ver `api/main.py`. */
 export function getRisk(asset: string): Promise<RiskResponse> {
   return apiGet<RiskResponse>("/api/risk", { asset });
+}
+
+/**
+ * Comparación de riesgo actual entre las 5 monedas (Fase 20b) — a
+ * diferencia de `getRisk`, RÁPIDO (sin ajuste de GARCH, ver
+ * `api/main.py::get_risk_summary`): pensado para cargar automáticamente
+ * al entrar a la vista "Riesgo", no solo ante un botón explícito.
+ */
+export function getRiskSummary(): Promise<RiskSummaryResponse> {
+  return apiGet<RiskSummaryResponse>("/api/risk-summary");
 }
 
 export function getBacktest(asset: string): Promise<BacktestResponse> {

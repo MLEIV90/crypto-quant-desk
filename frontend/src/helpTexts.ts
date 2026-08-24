@@ -95,6 +95,24 @@ export const RISK_REGIME_STRIP_HELP =
   "reciente. Es una clasificación retrospectiva sobre datos ya conocidos, no un aviso de que el régimen esté " +
   "por cambiar.";
 
+// Fase 20b: vol targeting comparado contra buy & hold, y tabla de riesgo de las 5 monedas.
+
+export const RISK_VOL_TARGETING_HELP =
+  "Vol targeting, en criollo: en vez de invertir siempre el mismo tamaño, la estrategia reduce la exposición " +
+  "cuando el activo está más volátil de lo normal y la aumenta cuando está más tranquilo — apunta a que el " +
+  "RIESGO de la cartera sea parejo en el tiempo, no el capital invertido. Acá se compara la estrategia " +
+  "completa del motor de señales (dirección + este sizing por volatilidad) contra comprar y mantener, con " +
+  "los mismos costos de transacción para los dos. El objetivo NO es ganar más — de hecho suele ganar algo " +
+  "menos en un mercado alcista sostenido — sino sufrir MENOS en las caídas: mirá la comparación de máximo " +
+  "drawdown, no solo el retorno final.";
+
+export const RISK_SUMMARY_HELP =
+  "Comparación de riesgo actual entre las 5 monedas — cuál está más volátil o en tensión hoy. El régimen de " +
+  "esta tabla usa volatilidad REALIZADA (histórica), no el modelo GARCH que arma el resto de esta vista para " +
+  "el activo seleccionado: ajustar un GARCH para las 5 monedas a la vez sería demasiado lento para una tabla " +
+  "que se lee de un vistazo, así que acá se prioriza velocidad sobre precisión — puede diferir levemente del " +
+  "régimen GARCH de arriba. Hacé clic en una fila para pasar a ver el detalle completo de esa moneda.";
+
 export const SUGGESTER_HELP =
   "Es un VOTO de varios estudios técnicos (RSI, medias, MACD, estocástico, Bollinger, pivote) combinados por " +
   "mayoría — no un modelo entrenado ni una IA que aprendió patrones. Antes de hacerle caso, mirá su desempeño " +

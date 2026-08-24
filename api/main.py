@@ -83,6 +83,8 @@ from api.models import (
     ReturnHistogram,
     RiskPercentiles,
     RiskResponse,
+    RiskSummaryResponse,
+    RiskSummaryRow,
     SeasonalityBucket,
     StatsResponse,
     StudiesResponse,
@@ -608,6 +610,66 @@ def get_risk(asset: str) -> RiskResponse:
         percentiles=percentiles,
         histograma=histograma,
     )
+
+
+# --------------------------------------------------------------------------
+# GET /api/risk-summary
+# --------------------------------------------------------------------------
+
+
+@router.get(
+    "/risk-summary",
+    response_model=RiskSummaryResponse,
+    summary="Comparación de riesgo actual entre las 5 monedas (rápido, sin GARCH)",
+)
+def get_risk_summary() -> RiskSummaryResponse:
+    """Reutiliza `signals.returns.simple_returns`, `metrics.risk_measures.value_at_risk`/
+    `historical_percentile`/`rolling_value_at_risk` y `models.garch.volatility_regime`
+    (Fase 20b) — la misma fórmula de vol realizada que `GET /api/risk`
+    (`returns.rolling(VOL_WINDOW).std(ddof=1) * sqrt(PERIODS_PER_YEAR)`) y
+    la MISMA función de régimen, pero aplicada a esa serie de vol
+    REALIZADA en vez de a la volatilidad condicional GARCH.
+
+    DECISIÓN DE RENDIMIENTO (léase antes de tocar esto): `GET /api/risk`
+    ajusta un modelo GARCH (`models.garch.select_best_model`, un grid
+    search de 6 especificaciones) — varios segundos por activo. Este
+    endpoint evalúa las 5 monedas de `config.UNIVERSE` de una sola vez,
+    pensado para cargar automáticamente al entrar a la vista "Riesgo" (sin
+    un botón explícito de por medio, a diferencia de `/api/prediction`) —
+    ajustar 5 modelos GARCH secuenciales haría esa carga demasiado lenta
+    para una tabla comparativa que se supone se lee "de un vistazo". En vez
+    de eso, se usa volatilidad REALIZADA (rápida: un rolling std) tanto
+    para el valor mostrado como para clasificar el régimen — `RiskSummaryRow`
+    documenta esta diferencia con `GET /api/risk` explícitamente, para que
+    no se confunda con el régimen GARCH de la vista detallada de un activo.
+    No devuelve `vol_garch` por el mismo motivo.
+    """
+    filas: list[RiskSummaryRow] = []
+    for asset in UNIVERSE:
+        df = _load_df(asset, DEFAULT_RISK_INTERVAL)
+        close = df["close"]
+        returns = simple_returns(close).dropna()
+
+        realized_vol_series = returns.rolling(window=VOL_WINDOW).std(ddof=1) * np.sqrt(PERIODS_PER_YEAR)
+        regime_series = volatility_regime(realized_vol_series)
+        last_regime = regime_series.iloc[-1]
+
+        var95 = value_at_risk(returns, level=0.95)
+        rolling_var = rolling_value_at_risk(returns, window=PERIODS_PER_YEAR, level=0.95)
+
+        filas.append(
+            RiskSummaryRow(
+                asset=asset,
+                vol_realizada=float(realized_vol_series.iloc[-1]),
+                vol_realizada_percentil=_none_if_nan(historical_percentile(realized_vol_series)),
+                regimen=str(last_regime) if pd.notna(last_regime) else None,
+                var95=float(var95),
+                var95_percentil=_none_if_nan(historical_percentile(rolling_var)),
+                ultima_fecha=close.index[-1].to_pydatetime(),
+            )
+        )
+
+    return RiskSummaryResponse(filas=filas)
 
 
 # --------------------------------------------------------------------------
