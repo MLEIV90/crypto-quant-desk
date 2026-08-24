@@ -259,3 +259,49 @@ def expected_shortfall(r: pd.Series, level: float = 0.95) -> float:
     if len(tail) == 0:
         tail = r.nsmallest(1)
     return -float(tail.mean())
+
+
+# --------------------------------------------------------------------------
+# Percentil histórico y VaR/ES en ventana móvil (Fase 20a)
+# --------------------------------------------------------------------------
+
+
+def historical_percentile(series: pd.Series, value: float | None = None) -> float:
+    """Percentil (0-100) de `value` dentro de la distribución histórica de
+    `series` — "¿qué fracción de las observaciones históricas tuvo un valor
+    MENOR O IGUAL al de hoy?". Si `value` es None (default), se usa el
+    ÚLTIMO valor no-NaN de `series` — la pregunta natural "¿el valor de HOY
+    es alto o bajo comparado con su propia historia?".
+
+    Es una foto DESCRIPTIVA de dónde cae un valor respecto de su propio
+    pasado — no una probabilidad de nada futuro ni una predicción: un
+    percentil alto de volatilidad hoy no dice nada sobre la volatilidad de
+    mañana, solo que hoy es inusual respecto de lo que ya se vio.
+
+    Devuelve NaN si `series` no tiene ninguna observación válida.
+    """
+    clean = series.dropna()
+    if len(clean) == 0:
+        return np.nan
+    if value is None:
+        value = float(clean.iloc[-1])
+    return float((clean <= value).mean() * 100.0)
+
+
+def rolling_value_at_risk(r: pd.Series, window: int, level: float = 0.95) -> pd.Series:
+    """`value_at_risk` (reutilizada tal cual, sin reimplementar el cálculo)
+    recalculada en una ventana móvil de `window` observaciones — para poder
+    ubicar el VaR de HOY en el contexto de cómo fue variando en el tiempo
+    (ver `historical_percentile`), en vez de un único número sobre TODA la
+    historia. Los primeros `window - 1` valores quedan en NaN (warmup, sin
+    suficientes observaciones todavía para esa ventana).
+    """
+    return r.rolling(window).apply(lambda window_values: value_at_risk(pd.Series(window_values), level=level), raw=True)
+
+
+def rolling_expected_shortfall(r: pd.Series, window: int, level: float = 0.95) -> pd.Series:
+    """Igual que `rolling_value_at_risk`, pero con `expected_shortfall`
+    (reutilizada tal cual)."""
+    return r.rolling(window).apply(
+        lambda window_values: expected_shortfall(pd.Series(window_values), level=level), raw=True
+    )

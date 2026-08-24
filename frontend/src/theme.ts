@@ -79,6 +79,22 @@ export const REGIME_COLORS: Record<string, string> = {
   tension: COLORS.danger,
 };
 
+/** Régimen -> color para la FRANJA histórica de `RegimeStrip` (Fase 20a) —
+ * gris para "normal" en vez del ámbar de `REGIME_COLORS`: en una franja
+ * continua que cubre TODA la historia, "normal" es el estado por defecto
+ * la mayor parte del tiempo, así que pintarlo con un color de alerta
+ * (ámbar) dominaría visualmente la franja y opacaría los tramos de calma/
+ * tensión, que son los que de verdad importa distinguir de un vistazo.
+ * `REGIME_COLORS` sigue igual para la tarjeta de "régimen actual" (un
+ * único punto en el tiempo, donde ámbar como color intermedio sí tiene
+ * sentido).
+ */
+export const REGIME_STRIP_COLORS: Record<string, string> = {
+  calma: COLORS.success,
+  normal: COLORS.textFaint,
+  tension: COLORS.danger,
+};
+
 /** Voto de un estudio del sugeridor (`signals.suggester`) -> color. */
 export const VOTE_COLORS: Record<string, string> = {
   alcista: COLORS.success,

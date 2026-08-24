@@ -269,6 +269,20 @@ def test_get_risk_returns_expected_fields() -> None:
     assert body["es95"] >= body["var95"]  # Expected Shortfall siempre >= VaR (misma convención de pérdida positiva)
     assert "/" in body["modelo_garch"]
 
+    # Fase 20a: percentiles históricos, todos en [0, 100] o None.
+    percentiles = body["percentiles"]
+    for key in ("vol_realizada", "vol_garch", "var95", "es95"):
+        value = percentiles[key]
+        assert value is None or 0.0 <= value <= 100.0
+
+    # Fase 20a: histograma de retornos + marcas de VaR/ES.
+    histograma = body["histograma"]
+    assert len(histograma["bin_edges"]) == len(histograma["counts"]) + 1
+    assert sum(histograma["counts"]) > 0
+    assert histograma["es95_return"] <= histograma["var95_return"]  # la cola del ES es más extrema (más negativa)
+    assert histograma["var95_return"] == pytest.approx(-body["var95"])
+    assert histograma["es95_return"] == pytest.approx(-body["es95"])
+
 
 def test_get_risk_unknown_asset_returns_404() -> None:
     response = client.get("/api/risk", params={"asset": "DOGE"})
@@ -310,6 +324,11 @@ def test_get_garch_series_returns_series() -> None:
     assert len(body["fechas"]) == len(body["vol_condicional"])
     assert len(body["fechas"]) > 0
     assert "/" in body["modelo_garch"]
+
+    # Fase 20a: una etiqueta de régimen por fecha, mismo largo que la serie.
+    assert len(body["regimen_serie"]) == len(body["fechas"])
+    assert set(v for v in body["regimen_serie"] if v is not None) <= {"calma", "normal", "tension"}
+    assert body["regimen_serie"][-1] == body["regimen_actual"]
 
 
 # --------------------------------------------------------------------------

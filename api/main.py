@@ -40,6 +40,7 @@ from __future__ import annotations
 import io
 import logging
 
+import numpy as np
 import pandas as pd
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -79,6 +80,8 @@ from api.models import (
     PairZscoreExtreme,
     PredictionResponse,
     RefreshResponse,
+    ReturnHistogram,
+    RiskPercentiles,
     RiskResponse,
     SeasonalityBucket,
     StatsResponse,
@@ -87,11 +90,17 @@ from api.models import (
     VolumeProfileResponse,
 )
 from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
-from config import TRANSACTION_COST_BPS, UNIVERSE
+from config import PERIODS_PER_YEAR, TRANSACTION_COST_BPS, UNIVERSE, VOL_WINDOW
 from data.loaders import RESAMPLED_INTERVALS, get_prices
 from data.snapshot import GeoblockedError, last_closed_candle_open_time, update_snapshot
 from eda.eda_report import adf_test, correlation_matrix
-from metrics.risk_measures import expected_shortfall, value_at_risk
+from metrics.risk_measures import (
+    expected_shortfall,
+    historical_percentile,
+    rolling_expected_shortfall,
+    rolling_value_at_risk,
+    value_at_risk,
+)
 from ml.features import align_features_labels, build_feature_matrix
 from ml.labeling import get_daily_volatility, triple_barrier_labels
 from ml.models import evaluate_primary_with_roc_auc, feature_importances, fit_final, latest_oos_prediction, t1_from_labels
@@ -254,6 +263,15 @@ def _series_to_list(series: pd.Series) -> list[float | None]:
 
 def _dates_to_list(index: pd.DatetimeIndex) -> list:
     return list(index.to_pydatetime())
+
+
+def _regime_series_to_list(series: pd.Series) -> list[str | None]:
+    """Como `_series_to_list`, pero para la serie de régimen (Fase 20a) —
+    valores STRING ("calma"/"normal"/"tension"), no numéricos: NaN (warmup,
+    ver `models.garch.volatility_regime`) se convierte a None, el resto a
+    `str` tal cual.
+    """
+    return [None if pd.isna(v) else str(v) for v in series.to_numpy(dtype=object)]
 
 
 def _drawdown_to_model(d: dict) -> DrawdownEpisode:
@@ -544,6 +562,37 @@ def get_risk(asset: str) -> RiskResponse:
 
     recomendacion = latest_recommendation(df, garch_regime=False)
 
+    # Fase 20a: percentil histórico de cada métrica — "¿hoy es más
+    # riesgoso que lo habitual?". Vol realizada/GARCH ya son series
+    # temporales (se compara el último valor contra su propia historia).
+    # VaR/ES son puntuales sobre TODA la historia (arriba), así que para
+    # tener una serie contra la cual ubicar el valor de hoy se recalculan
+    # en una ventana móvil de 1 año (PERIODS_PER_YEAR, mismo horizonte que
+    # models.garch.volatility_regime) — ver metrics.risk_measures.
+    realized_vol_series = (
+        returns.rolling(window=VOL_WINDOW).std(ddof=1) * np.sqrt(PERIODS_PER_YEAR)
+    )  # misma fórmula que signals.engine.generate_positions/latest_recommendation
+    rolling_var = rolling_value_at_risk(returns, window=PERIODS_PER_YEAR, level=0.95)
+    rolling_es = rolling_expected_shortfall(returns, window=PERIODS_PER_YEAR, level=0.95)
+
+    percentiles = RiskPercentiles(
+        vol_realizada=_none_if_nan(historical_percentile(realized_vol_series)),
+        vol_garch=_none_if_nan(historical_percentile(cond_vol)),
+        var95=_none_if_nan(historical_percentile(rolling_var)),
+        es95=_none_if_nan(historical_percentile(rolling_es)),
+    )
+
+    # Fase 20a: distribución de retornos diarios + marcas de VaR/ES sobre
+    # esa distribución, para el histograma del frontend (bins vía
+    # numpy.histogram, no un cálculo propio del proyecto).
+    counts, edges = np.histogram(returns.to_numpy(), bins=40)
+    histograma = ReturnHistogram(
+        bin_edges=[float(edge) for edge in edges],
+        counts=[int(count) for count in counts],
+        var95_return=float(-var95),
+        es95_return=float(-es95),
+    )
+
     return RiskResponse(
         asset=asset,
         vol_realizada=float(recomendacion["vol_realizada"]),
@@ -556,6 +605,8 @@ def get_risk(asset: str) -> RiskResponse:
         score=float(recomendacion["score"]),
         tamano_sugerido=float(recomendacion["tamaño_sugerido"]),
         ultima_fecha=close.index[-1].to_pydatetime(),
+        percentiles=percentiles,
+        histograma=histograma,
     )
 
 
@@ -622,6 +673,7 @@ def get_garch_series(asset: str) -> GarchSeriesResponse:
         vol_condicional=_series_to_list(cond_vol),
         modelo_garch=f"{best['vol']}/{best['dist']}",
         regimen_actual=str(last_regime) if pd.notna(last_regime) else None,
+        regimen_serie=_regime_series_to_list(regime_series),
     )
 
 

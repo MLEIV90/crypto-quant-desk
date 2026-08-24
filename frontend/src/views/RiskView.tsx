@@ -22,11 +22,35 @@ import { CsvDownloadButton } from "../components/CsvDownloadButton";
 import { LineChartPanel } from "../components/LineChartPanel";
 import { MetricCard } from "../components/MetricCard";
 import { candleLimitForPeriod, PeriodSelector, type PeriodKey } from "../components/PeriodSelector";
+import { RegimeStrip } from "../components/RegimeStrip";
+import { ReturnHistogramChart } from "../components/ReturnHistogramChart";
 import { StatusMessage } from "../components/StatusMessage";
-import { RISK_INTRO_HELP, RISK_METRIC_HELP } from "../helpTexts";
+import {
+  RISK_HISTOGRAM_HELP,
+  RISK_INTRO_HELP,
+  RISK_METRIC_HELP,
+  RISK_PERCENTILE_HELP,
+  RISK_REGIME_STRIP_HELP,
+} from "../helpTexts";
 import { COLORS, DIRECTION_COLORS, REGIME_COLORS } from "../theme";
 
 const RISK_INTERVAL = "1d"; // el modelo GARCH del proyecto es diario, ver api/main.py::DEFAULT_RISK_INTERVAL
+
+// Fase 20a: umbrales de color del percentil histórico — deliberadamente
+// los mismos ~70/90 que usa REGIME_COLORS de forma implícita (percentiles
+// de volatilidad muy altos son justamente lo que dispara "tensión" en
+// models.garch.volatility_regime), para que el color de la tarjeta no
+// contradiga el del régimen mostrado al lado.
+function percentileDescriptor(percentile: number | null): { text: string; color?: string } {
+  if (percentile === null) {
+    return { text: "Sin historia suficiente para calcular el percentil." };
+  }
+  const rounded = Math.round(percentile);
+  const text = `percentil ${rounded} — más alto que el ${rounded}% de la historia`;
+  if (percentile >= 90) return { text, color: COLORS.danger };
+  if (percentile >= 70) return { text, color: COLORS.warning };
+  return { text };
+}
 
 interface RiskViewProps {
   asset: string;
@@ -65,13 +89,17 @@ export function RiskView({ asset }: RiskViewProps) {
           <MetricCard
             label="Vol. realizada anualizada"
             value={`${(risk.vol_realizada * 100).toFixed(2)}%`}
-            help={RISK_METRIC_HELP.volRealizada}
+            help={`${RISK_METRIC_HELP.volRealizada} ${RISK_PERCENTILE_HELP}`}
+            subtext={percentileDescriptor(risk.percentiles.vol_realizada).text}
+            subtextColor={percentileDescriptor(risk.percentiles.vol_realizada).color}
           />
           <MetricCard label="Modelo GARCH ganador" value={risk.modelo_garch} help={RISK_METRIC_HELP.modeloGarch} />
           <MetricCard
             label="Vol. condicional GARCH"
             value={`${(risk.vol_garch * 100).toFixed(2)}%`}
-            help={RISK_METRIC_HELP.volGarch}
+            help={`${RISK_METRIC_HELP.volGarch} ${RISK_PERCENTILE_HELP}`}
+            subtext={percentileDescriptor(risk.percentiles.vol_garch).text}
+            subtextColor={percentileDescriptor(risk.percentiles.vol_garch).color}
           />
           <MetricCard
             label="Régimen de volatilidad"
@@ -82,12 +110,16 @@ export function RiskView({ asset }: RiskViewProps) {
           <MetricCard
             label="VaR 95% (pérdida diaria)"
             value={`${(risk.var95 * 100).toFixed(2)}%`}
-            help={RISK_METRIC_HELP.var95}
+            help={`${RISK_METRIC_HELP.var95} ${RISK_PERCENTILE_HELP}`}
+            subtext={percentileDescriptor(risk.percentiles.var95).text}
+            subtextColor={percentileDescriptor(risk.percentiles.var95).color}
           />
           <MetricCard
             label="Expected Shortfall 95%"
             value={`${(risk.es95 * 100).toFixed(2)}%`}
-            help={RISK_METRIC_HELP.es95}
+            help={`${RISK_METRIC_HELP.es95} ${RISK_PERCENTILE_HELP}`}
+            subtext={percentileDescriptor(risk.percentiles.es95).text}
+            subtextColor={percentileDescriptor(risk.percentiles.es95).color}
           />
           <MetricCard
             label="Señal del engine"
@@ -101,6 +133,21 @@ export function RiskView({ asset }: RiskViewProps) {
             help={RISK_METRIC_HELP.sizing}
           />
         </div>
+      )}
+
+      {!errorMessage && risk && (
+        <>
+          <h3 className="panel-subtitle">
+            Distribución de retornos diarios ({asset})
+          </h3>
+          <p className="view-note">{RISK_HISTOGRAM_HELP}</p>
+          <ReturnHistogramChart
+            binEdges={risk.histograma.bin_edges}
+            counts={risk.histograma.counts}
+            var95Return={risk.histograma.var95_return}
+            es95Return={risk.histograma.es95_return}
+          />
+        </>
       )}
 
       {!errorMessage && price && (
@@ -143,6 +190,9 @@ export function RiskView({ asset }: RiskViewProps) {
             ]}
             height={280}
           />
+          <h3 className="panel-subtitle">Régimen de volatilidad en el tiempo</h3>
+          <p className="view-note">{RISK_REGIME_STRIP_HELP}</p>
+          <RegimeStrip fechas={garch.fechas} regimenes={garch.regimen_serie} />
         </>
       )}
     </section>

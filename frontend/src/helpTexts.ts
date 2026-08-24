@@ -73,6 +73,28 @@ export const RISK_METRIC_HELP = {
     "del book, reduciendo el tamaño cuando el activo está más volátil de lo normal.",
 };
 
+// Fase 20a: percentil histórico, histograma de retornos y franja de régimen.
+
+export const RISK_PERCENTILE_HELP =
+  "Percentil histórico de esta métrica: qué fracción de TODA la historia del activo tuvo un valor menor o " +
+  "igual al de hoy. Un percentil de 90 significa 'hoy está más alto que el 90% de los días históricos' — es " +
+  "una foto descriptiva de qué tan inusual es el valor de hoy respecto de su propio pasado, no una " +
+  "probabilidad ni una predicción de lo que va a pasar mañana. VaR/ES comparan contra una ventana móvil de " +
+  "1 año (no contra el número único de toda la historia que se muestra arriba), porque necesitan su propia " +
+  "serie para poder ubicar el valor de hoy en algún lado.";
+
+export const RISK_HISTOGRAM_HELP =
+  "Distribución de los retornos diarios del activo. El VaR marca la pérdida del peor 5% de los días; el ES, " +
+  "el promedio de pérdida cuando ese 5% peor efectivamente ocurre (por eso el ES siempre cae más a la " +
+  "izquierda, más adentro de la cola mala). Las barras de esa cola se resaltan para que se vea, literalmente, " +
+  "dónde vive el riesgo — no es una curva teórica (normal/gaussiana), es la distribución REAL observada.";
+
+export const RISK_REGIME_STRIP_HELP =
+  "Régimen de volatilidad (calma/normal/tensión, ver más arriba) de CADA fecha, no solo la de hoy — así se ve " +
+  "cómo alternó en la historia del activo y si el momento actual es parte de un tramo largo o un cambio " +
+  "reciente. Es una clasificación retrospectiva sobre datos ya conocidos, no un aviso de que el régimen esté " +
+  "por cambiar.";
+
 export const SUGGESTER_HELP =
   "Es un VOTO de varios estudios técnicos (RSI, medias, MACD, estocástico, Bollinger, pivote) combinados por " +
   "mayoría — no un modelo entrenado ni una IA que aprendió patrones. Antes de hacerle caso, mirá su desempeño " +

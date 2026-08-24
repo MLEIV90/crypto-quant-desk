@@ -111,6 +111,41 @@ class SuggesterResponse(BaseModel):
     desempeno_historico: DesempenoHistorico
 
 
+class RiskPercentiles(BaseModel):
+    """Percentil histórico (0-100) de cada métrica de riesgo (Fase 20a) —
+    ver `metrics.risk_measures.historical_percentile`: "¿qué fracción de la
+    propia historia de esta métrica tuvo un valor MENOR O IGUAL al de hoy?".
+    Descriptivo, no predictivo — un percentil alto no anticipa nada sobre
+    mañana, solo describe que hoy es inusual respecto del pasado.
+
+    `var95`/`es95` se calculan contra una serie de VaR/ES recalculada en
+    ventana móvil de 1 año (no contra el valor único sobre TODA la
+    historia que muestra `RiskResponse.var95`/`es95`) — necesitan su propia
+    serie histórica para poder ubicar el valor de hoy en algún lado, ver
+    `metrics.risk_measures.rolling_value_at_risk`/`rolling_expected_shortfall`.
+    """
+
+    vol_realizada: float | None
+    vol_garch: float | None
+    var95: float | None
+    es95: float | None
+
+
+class ReturnHistogram(BaseModel):
+    """Distribución de retornos diarios del activo (Fase 20a), con las
+    marcas de VaR 95% y ES 95% ya convertidas a RETORNO (negativo, para
+    ubicarlas directamente sobre el eje del histograma) — ver
+    `metrics.risk_measures.value_at_risk`/`expected_shortfall` (que
+    devuelven la pérdida en positivo; acá el signo se invierte una sola vez
+    para que el frontend no tenga que repetir esa conversión).
+    """
+
+    bin_edges: list[float] = Field(description="Bordes de los bins (longitud = len(counts) + 1)")
+    counts: list[int] = Field(description="Cantidad de días en cada bin")
+    var95_return: float = Field(description="Retorno correspondiente al VaR 95% (negativo)")
+    es95_return: float = Field(description="Retorno correspondiente al ES 95% (negativo, <= var95_return)")
+
+
 class RiskResponse(BaseModel):
     """Respuesta de `GET /api/risk` — mismas magnitudes que calcula
     `app.workers.AnalysisWorker` para la pestaña "Riesgo" del cockpit,
@@ -128,6 +163,8 @@ class RiskResponse(BaseModel):
     score: float
     tamano_sugerido: float = Field(description="Tamaño de posición por vol targeting, en [-1, 1]")
     ultima_fecha: datetime
+    percentiles: RiskPercentiles
+    histograma: ReturnHistogram
 
 
 class EquityPoint(BaseModel):
@@ -154,6 +191,12 @@ class GarchSeriesResponse(BaseModel):
     """Respuesta de `GET /api/garch-series`: serie temporal completa de
     volatilidad condicional GARCH, para graficarla (p. ej. el panel de
     riesgo del futuro frontend).
+
+    `regimen_serie` (Fase 20a): la clasificación calma/normal/tensión
+    (`models.garch.volatility_regime`) de CADA fecha, no solo la actual —
+    misma longitud e índice que `fechas`/`vol_condicional` — para pintar
+    una franja de régimen a lo largo del tiempo, no solo mostrar el régimen
+    de hoy.
     """
 
     asset: str
@@ -161,6 +204,7 @@ class GarchSeriesResponse(BaseModel):
     vol_condicional: list[float | None]
     modelo_garch: str
     regimen_actual: str | None
+    regimen_serie: list[str | None]
 
 
 class PredictionResponse(BaseModel):

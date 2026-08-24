@@ -84,6 +84,20 @@ export interface SuggesterResponse {
   desempeno_historico: DesempenoHistorico;
 }
 
+export interface RiskPercentiles {
+  vol_realizada: number | null;
+  vol_garch: number | null;
+  var95: number | null;
+  es95: number | null;
+}
+
+export interface ReturnHistogram {
+  bin_edges: number[];
+  counts: number[];
+  var95_return: number;
+  es95_return: number;
+}
+
 export interface RiskResponse {
   asset: string;
   vol_realizada: number;
@@ -96,6 +110,8 @@ export interface RiskResponse {
   score: number;
   tamano_sugerido: number;
   ultima_fecha: string;
+  percentiles: RiskPercentiles;
+  histograma: ReturnHistogram;
 }
 
 export interface EquityPoint {
@@ -117,6 +133,7 @@ export interface GarchSeriesResponse {
   vol_condicional: (number | null)[];
   modelo_garch: string;
   regimen_actual: "calma" | "normal" | "tension" | null;
+  regimen_serie: ("calma" | "normal" | "tension" | null)[];
 }
 
 export interface DataStatusResponse {

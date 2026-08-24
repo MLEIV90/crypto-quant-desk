@@ -13,7 +13,10 @@ from metrics.risk_measures import (
     calmar_ratio,
     equity_curve,
     expected_shortfall,
+    historical_percentile,
     max_drawdown,
+    rolling_expected_shortfall,
+    rolling_value_at_risk,
     sharpe_lo_adjusted,
     sharpe_ratio,
     sortino_ratio,
@@ -160,3 +163,67 @@ def test_value_at_risk_higher_confidence_is_more_conservative() -> None:
     var99 = value_at_risk(r, level=0.99)
 
     assert var99 >= var95
+
+
+# --------------------------------------------------------------------------
+# historical_percentile / rolling VaR-ES (Fase 20a)
+# --------------------------------------------------------------------------
+
+
+def test_historical_percentile_known_case() -> None:
+    # 10 valores 1..10: el último (10) es el máximo -> percentil 100
+    # (el 100% de la serie, incluido él mismo, es <= 10).
+    series = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
+    assert historical_percentile(series) == pytest.approx(100.0)
+
+    # El mínimo (1) es <= solo a sí mismo -> percentil 10 (1 de 10 valores).
+    assert historical_percentile(series, value=1.0) == pytest.approx(10.0)
+
+    # La mediana exacta de un rango 1..10 par no cae en un solo valor, pero
+    # un valor conocido (5.0) es <= a 5 de los 10 -> percentil 50.
+    assert historical_percentile(series, value=5.0) == pytest.approx(50.0)
+
+
+def test_historical_percentile_is_always_between_0_and_100() -> None:
+    rng = np.random.default_rng(5)
+    series = pd.Series(rng.normal(size=500))
+    for value in [series.min(), series.max(), series.median(), 0.0, 1e6, -1e6]:
+        p = historical_percentile(series, value=float(value))
+        assert 0.0 <= p <= 100.0
+
+
+def test_historical_percentile_empty_series_is_nan() -> None:
+    assert np.isnan(historical_percentile(pd.Series(dtype=float)))
+
+
+def test_historical_percentile_defaults_to_last_value() -> None:
+    series = pd.Series([10.0, 1.0, 2.0, 3.0])  # último valor (3.0) es <= a 3 de 4 -> percentil 75
+    assert historical_percentile(series) == pytest.approx(75.0)
+
+
+def test_rolling_value_at_risk_matches_manual_window_computation() -> None:
+    rng = np.random.default_rng(11)
+    r = pd.Series(rng.normal(0.0, 0.02, 100))
+    window = 30
+
+    rolling = rolling_value_at_risk(r, window=window, level=0.95)
+
+    assert rolling.iloc[: window - 1].isna().all()  # warmup
+    manual = value_at_risk(r.iloc[0:window], level=0.95)  # primera ventana completa
+    assert rolling.iloc[window - 1] == pytest.approx(manual)
+
+    last_window = r.iloc[-window:]
+    assert rolling.iloc[-1] == pytest.approx(value_at_risk(last_window, level=0.95))
+
+
+def test_rolling_expected_shortfall_is_always_ge_rolling_var() -> None:
+    rng = np.random.default_rng(13)
+    r = pd.Series(rng.normal(0.0, 0.02, 200))
+    window = 50
+
+    rolling_var = rolling_value_at_risk(r, window=window, level=0.95)
+    rolling_es = rolling_expected_shortfall(r, window=window, level=0.95)
+
+    valid = rolling_var.notna() & rolling_es.notna()
+    assert valid.sum() > 0
+    assert (rolling_es[valid] >= rolling_var[valid]).all()
