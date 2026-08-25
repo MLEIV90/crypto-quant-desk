@@ -387,3 +387,69 @@ export const ARBITRAGE_PAIR_BACKTEST_FLAT_PERIODS_NOTE =
   "Los tramos planos en la curva de equity son períodos SIN operaciones (el z-score del spread no cruzó los " +
   "umbrales de entrada/salida) — es el comportamiento correcto de la estrategia, no un cuelgue ni un error de " +
   "datos: mientras el spread se mueve cerca de su media, no hay señal para entrar.";
+
+// --------------------------------------------------------------------------
+// Vista "Research" (Fase 8c, rehecha en Fase 24) — /api/prediction (ML
+// supervisado, on-demand) y /api/research-experiments (RL y rotación,
+// resultados YA guardados, se leen tal cual). Toda esta vista es
+// investigación con resultado NEGATIVO: ningún enfoque encontró una ventaja
+// operable. Ese resultado ES el hallazgo, no un defecto a disimular.
+// --------------------------------------------------------------------------
+
+export const RESEARCH_THESIS_TEXT =
+  "Acá documentamos todo lo que probamos para PREDECIR el mercado, con validación rigurosa. El resultado, " +
+  "consistente en todos los enfoques, es que la dirección de estos criptoactivos no se predice de forma " +
+  "confiable con datos y métodos accesibles. Eso NO es un fracaso: es un hallazgo, y es lo que evita que " +
+  "esta herramienta te venda humo. La honestidad de esta sección es el diferencial de todo el proyecto: si " +
+  "algo funcionara de verdad para predecir dirección, no estaría documentado gratis acá.";
+
+export const RESEARCH_ML_APPROACH_HELP =
+  "Gradient boosting (XGBoost) sobre indicadores técnicos (y features on-chain para BTC/ETH) para predecir la " +
+  "dirección de la próxima vela. Etiquetas por triple-barrera (López de Prado, no un simple 'subió/bajó a N " +
+  "días') y validación cruzada PURGADA con embargo: los folds de entrenamiento nunca incluyen datos que se " +
+  "solapan en el tiempo con lo que se evalúa, la fuga de información más común en ML financiero. Corré la " +
+  "predicción vos mismo más abajo para ver el resultado actualizado.";
+
+export const RESEARCH_RL_APPROACH_HELP =
+  "Un agente de Reinforcement Learning (PPO) decide qué fracción de la cartera poner en cada moneda (o en " +
+  "cash) para maximizar el retorno ajustado por riesgo — a diferencia del ML supervisado, no predice una " +
+  "clase, aprende una política de asignación directamente. Se evalúa con walk-forward (entrena solo con el " +
+  "pasado, el tramo OOS siempre es futuro respecto del entrenamiento) y varias semillas aleatorias, porque un solo " +
+  "entrenamiento de una red neuronal puede salir bien o mal por azar de la inicialización — una corrida sola " +
+  "no prueba nada.";
+
+export const RESEARCH_ROTATION_APPROACH_HELP =
+  "El test más simple posible antes de complicarlo con ML: rotar entre dos monedas relacionadas hacia la que " +
+  "tuvo mejor momentum relativo reciente, en vez de mantener las dos fijas. La lógica es la misma que motivó " +
+  "el resto de la investigación — si una regla tan simple no le gana de forma robusta a sus baselines después " +
+  "de costos, es poco probable que un modelo más complejo la rescate.";
+
+export const RESEARCH_RL_TABLE_HELP =
+  "Cada fila es una estrategia; 'media ± std' es el Sharpe OOS promediado sobre las semillas de la red (0 para " +
+  "los baselines determinísticos, que no dependen de una semilla). El veredicto exige que la PEOR semilla del " +
+  "agente — no el promedio — supere a TODOS los baselines: alcanza con una sola corrida mala para responder " +
+  "que no hay ventaja consistente, porque en la práctica no sabrías de antemano con qué semilla te va a tocar " +
+  "entrenar el modelo real.";
+
+export const RESEARCH_ROTATION_TABLE_HELP =
+  "Se corrieron todas las combinaciones de lookback (ventana de momentum) y frecuencia de rebalanceo para cada " +
+  "par de monedas — sin quedarse con la mejor combinación después de verla (eso sería sobreajustar el reporte, " +
+  "no la estrategia). 'Robusto' exige ganarle a su mejor baseline en TODAS las combinaciones del par, no en " +
+  "una elegida a mano. Que solo 1 de 10 pares sea robusto es consistente con lo que esperarías por puro azar " +
+  "probando 10 pares al azar, no con un patrón real de momentum explotable.";
+
+export const RESEARCH_SYNTHESIS_TEXT =
+  "Múltiples enfoques independientes — indicadores técnicos, ML supervisado con y sin datos on-chain, datos " +
+  "horarios, arbitraje estadístico entre pares, Deep RL y rotación por momentum — todos validados con el " +
+  "mismo rigor (sin fugas, contra baselines triviales, sin quedarse con el mejor resultado después de verlo), " +
+  "llegan a la misma conclusión: ninguno encuentra una ventaja predictiva consistente sobre estos " +
+  "criptoactivos. Lo único que funcionó de forma consistente en este proyecto es la GESTIÓN de riesgo (vol " +
+  "targeting, ver la pestaña Riesgo) — no la predicción de dirección. Ese patrón, repetido en enfoques tan " +
+  "distintos entre sí, es lo que hace confiable al resto de la herramienta: no promete lo que no puede cumplir.";
+
+export const RESEARCH_METRIC_HELP: Record<string, string> = {
+  accuracy_media: "Fracción de predicciones OOS correctas (LONG/FLAT/SHORT), promediada sobre los folds purgados. Con 3 clases, el azar puro ronda 33% — un modelo real necesita superar eso con margen y de forma consistente, no en un fold suelto.",
+  baseline_azar: "Accuracy esperada de un clasificador que elige al azar entre las clases, respetando su frecuencia real (no necesariamente 33% exacto si las clases están desbalanceadas). La vara más baja que cualquier modelo debería superar.",
+  baseline_mayoritaria: "Accuracy de predecir SIEMPRE la clase más frecuente del período, sin mirar ningún dato de entrada. Una vara más exigente que el azar puro, y la que más modelos de ML mal evaluados no logran superar.",
+  roc_auc_media: "Área bajo la curva ROC (one-vs-rest, promediada entre clases): qué tan bien el modelo separa una clase de las demás en TODOS los umbrales posibles, no solo en el que se usó para decidir. 0.5 = azar, 1.0 = separación perfecta; 0.53 está prácticamente en 0.5.",
+};

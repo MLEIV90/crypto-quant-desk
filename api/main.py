@@ -38,7 +38,12 @@ Uso (desarrollo):
 from __future__ import annotations
 
 import io
+import json
 import logging
+import math
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -82,11 +87,14 @@ from api.models import (
     PairZscoreExtreme,
     PredictionResponse,
     RefreshResponse,
+    ResearchExperimentsResponse,
     ReturnHistogram,
     RiskPercentiles,
     RiskResponse,
     RiskSummaryResponse,
     RiskSummaryRow,
+    RlResearchResult,
+    RotationResearchResult,
     SeasonalityBucket,
     StatsResponse,
     StudiesResponse,
@@ -94,7 +102,7 @@ from api.models import (
     VolumeProfileResponse,
 )
 from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
-from config import PERIODS_PER_YEAR, TARGET_VOL, TRANSACTION_COST_BPS, UNIVERSE, VOL_WINDOW
+from config import BASE_DIR, PERIODS_PER_YEAR, TARGET_VOL, TRANSACTION_COST_BPS, UNIVERSE, VOL_WINDOW
 from data.loaders import RESAMPLED_INTERVALS, get_prices
 from data.snapshot import GeoblockedError, last_closed_candle_open_time, update_snapshot
 from eda.eda_report import adf_test, correlation_matrix
@@ -1029,6 +1037,99 @@ def get_prediction(asset: str) -> PredictionResponse:
         roc_auc_media=evaluacion["roc_auc_media"],
         top_features=top_features,
     )
+
+
+# --------------------------------------------------------------------------
+# GET /api/research-experiments (Fase 24)
+# --------------------------------------------------------------------------
+
+# Directorios donde `scripts/run_rl_experiment.py`/`scripts/run_rotation_experiment.py`
+# guardan sus corridas (Fases 18/19a) — este endpoint SOLO LEE lo que ya está
+# ahí, nunca corre un experimento nuevo (son lentos: RL tarda ~15 minutos,
+# ver `rl/results/*.json::elapsed_seconds`). Rutas vía `config.BASE_DIR`,
+# nunca relativas al directorio de trabajo del proceso (misma convención que
+# `config.DATA_DIR`).
+RL_RESULTS_DIR: Path = BASE_DIR / "rl" / "results"
+ROTATION_RESULTS_DIR: Path = BASE_DIR / "strategies" / "results"
+
+# Timestamp embebido en el nombre de archivo por los scripts de experimento
+# (p. ej. "rl_experiment_20260822_182720.json") — se usa para (a) elegir el
+# archivo más reciente por orden lexicográfico/cronológico y (b) exponer
+# "fecha_experimento" en la respuesta sin tener que guardarla aparte.
+_EXPERIMENT_TIMESTAMP_RE = re.compile(r"(\d{8}_\d{6})")
+
+
+def _latest_result_json(directory: Path) -> Path | None:
+    """El archivo `*.json` más reciente de `directory` (orden lexicográfico
+    == cronológico, por el timestamp `YYYYMMDD_HHMMSS` en el nombre), o
+    `None` si el directorio no existe o está vacío — el experimento
+    correspondiente nunca se corrió.
+    """
+    if not directory.exists():
+        return None
+    candidates = sorted(directory.glob("*.json"))
+    return candidates[-1] if candidates else None
+
+
+def _experiment_timestamp_from_filename(path: Path) -> datetime:
+    match = _EXPERIMENT_TIMESTAMP_RE.search(path.stem)
+    if match is None:
+        # No debería pasar con los nombres que generan los scripts de
+        # experimento, pero no es motivo para que el endpoint falle.
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    return datetime.strptime(match.group(1), "%Y%m%d_%H%M%S")
+
+
+def _nan_to_none(value):
+    """Los JSON de resultados guardados pueden tener `NaN` literal (Python
+    los escribe así por defecto; no es JSON estándar) en columnas que no
+    aplican a un par/fila dado — p. ej. `sharpe_buy_hold_SOL` en una fila
+    del par BTC-ETH (ver `strategies/results/*.json`). Los convierte a
+    `None` recursivamente ANTES de validar con Pydantic/serializar a JSON de
+    verdad, para no devolver un `NaN` no estándar en la respuesta HTTP.
+    """
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _nan_to_none(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_nan_to_none(v) for v in value]
+    return value
+
+
+@router.get(
+    "/research-experiments",
+    response_model=ResearchExperimentsResponse,
+    summary="Resultados guardados de los experimentos de Deep RL y rotación por momentum",
+)
+def get_research_experiments() -> ResearchExperimentsResponse:
+    """Lee (NO recalcula) el resultado más reciente de `rl/results/` y de
+    `strategies/results/` — experimentos lentos de investigación (Fases
+    18/19a) que se corren aparte con `scripts/run_rl_experiment.py`/
+    `scripts/run_rotation_experiment.py`, nunca desde un request HTTP.
+
+    Si un experimento nunca se corrió (directorio inexistente o vacío), el
+    campo correspondiente (`rl`/`rotation`) viene en `None` — degrada con
+    gracia, no lanza 404 ni 500: la pestaña Research de un checkout nuevo
+    sin experimentos guardados todavía es un estado válido, no un error.
+    """
+    rl_result: RlResearchResult | None = None
+    rl_path = _latest_result_json(RL_RESULTS_DIR)
+    if rl_path is not None:
+        with open(rl_path, encoding="utf-8") as f:
+            raw = _nan_to_none(json.load(f))
+        rl_result = RlResearchResult(fecha_experimento=_experiment_timestamp_from_filename(rl_path), **raw)
+
+    rotation_result: RotationResearchResult | None = None
+    rotation_path = _latest_result_json(ROTATION_RESULTS_DIR)
+    if rotation_path is not None:
+        with open(rotation_path, encoding="utf-8") as f:
+            raw = _nan_to_none(json.load(f))
+        rotation_result = RotationResearchResult(
+            fecha_experimento=_experiment_timestamp_from_filename(rotation_path), **raw
+        )
+
+    return ResearchExperimentsResponse(rl=rl_result, rotation=rotation_result)
 
 
 # --------------------------------------------------------------------------

@@ -360,6 +360,164 @@ class PredictionResponse(BaseModel):
     top_features: list[tuple[str, float]]
 
 
+# --------------------------------------------------------------------------
+# GET /api/research-experiments (Fase 24) — LEE (no recalcula) los resultados
+# YA guardados de los experimentos lentos de Deep RL (Fase 18) y rotación por
+# momentum (Fase 19a). Cada campo espeja tal cual el JSON que ya guardan
+# `scripts/run_rl_experiment.py`/`scripts/run_rotation_experiment.py` — ver
+# `api/main.py::get_research_experiments` para el detalle de cómo se localiza
+# el archivo más reciente y por qué degrada con gracia (campo en `None`) si
+# el experimento nunca se corrió.
+# --------------------------------------------------------------------------
+
+
+class RlParams(BaseModel):
+    """Parámetros con los que se corrió el experimento de RL guardado (`rl/results/*.json`)."""
+
+    assets: list[str]
+    min_train_days: int
+    n_blocks: int
+    seeds: list[int]
+    total_timesteps: int
+    cost_bps: float
+
+
+class RlBlock(BaseModel):
+    """Un bloque walk-forward: índices de barra (no fechas) de train/test."""
+
+    train_start: int
+    train_end: int
+    test_start: int
+    test_end: int
+
+
+class RlSummaryRow(BaseModel):
+    """Una fila de `summary_table`: una estrategia (RL o un baseline) con sus
+    métricas promediadas sobre las semillas — `*_std` es 0.0 para los
+    baselines determinísticos (buy & hold, vol targeting), que no dependen
+    de una semilla aleatoria.
+    """
+
+    estrategia: str
+    sharpe_media: float
+    sharpe_std: float
+    retorno_anualizado_media: float
+    retorno_anualizado_std: float
+    retorno_total_media: float
+    retorno_total_std: float
+    max_drawdown_media: float
+    max_drawdown_std: float
+    turnover_total_media: float
+    turnover_total_std: float
+    turnover_medio_diario_media: float
+    turnover_medio_diario_std: float
+
+
+class RlConclusion(BaseModel):
+    """Veredicto honesto (`rl.evaluation.rl_beats_all_baselines`): exige que
+    la PEOR semilla del agente, no el promedio, supere a TODOS los
+    baselines — una sola semilla mala alcanza para responder "No".
+    """
+
+    supera_a_todos_los_baselines_consistentemente: bool
+    sharpe_rl_peor_semilla: float
+    sharpe_rl_mejor_semilla: float
+    sharpe_baselines: dict[str, float]
+
+
+class RlResearchResult(BaseModel):
+    """Resultado completo del experimento de Deep RL más reciente guardado en
+    `rl/results/` — `fecha_experimento` se deriva del timestamp en el
+    nombre del archivo (`rl_experiment_YYYYMMDD_HHMMSS.json`), no está en
+    el JSON en sí.
+    """
+
+    fecha_experimento: datetime
+    params: RlParams
+    elapsed_seconds: float
+    n_ppo_runs: int
+    oos_date_range: list[str]
+    blocks: list[RlBlock]
+    summary_table: list[RlSummaryRow]
+    conclusion: RlConclusion
+
+
+class RotationParams(BaseModel):
+    """Parámetros del experimento de rotación guardado (`strategies/results/*.json`)."""
+
+    pairs: list[str]
+    lookback_grid: list[int]
+    rebalance_grid: list[int]
+    cost_bps: float | None
+    primary_pair: str
+
+
+class RotationSummaryRow(BaseModel):
+    """Una fila de `summary_table`: un par x lookback x rebalanceo. Los
+    `sharpe_buy_hold_<ASSET>` de monedas que NO son parte de `par` llegan
+    en `None` (NaN en el JSON original, saneado antes de validar — ver
+    `api/main.py::_nan_to_none`).
+    """
+
+    par: str
+    lookback_days: int
+    rebalance_days: int
+    sharpe_rotacion: float | None
+    cagr_rotacion: float | None
+    retorno_total_rotacion: float | None
+    max_drawdown_rotacion: float | None
+    n_rotaciones: int
+    mejor_baseline: str
+    sharpe_mejor_baseline: float | None
+    gana_al_mejor_baseline: bool
+    sharpe_buy_hold_BTC: float | None = None
+    sharpe_buy_hold_ETH: float | None = None
+    sharpe_buy_hold_SOL: float | None = None
+    sharpe_buy_hold_BNB: float | None = None
+    sharpe_buy_hold_LTC: float | None = None
+    sharpe_50_50_rebalanceado: float | None = None
+
+
+class RotationConclusion(BaseModel):
+    """Veredicto honesto (`strategies.rotation.rotation_beats_baselines_robustly`):
+    exige que el par principal sea robusto en TODAS sus combinaciones de
+    parámetros Y que al menos la mitad del resto de los pares también lo sea.
+    """
+
+    robusto_par_principal: bool
+    par_principal: str
+    fraccion_pares_robustos: float
+    pares_robustos: list[str]
+    veredicto_global: bool
+
+
+class RotationResearchResult(BaseModel):
+    """Resultado completo del experimento de rotación por momentum más
+    reciente guardado en `strategies/results/` — `fecha_experimento` se
+    deriva del timestamp en el nombre del archivo
+    (`rotation_experiment_YYYYMMDD_HHMMSS.json`).
+    """
+
+    fecha_experimento: datetime
+    params: RotationParams
+    elapsed_seconds: float
+    n_combos: int
+    summary_table: list[RotationSummaryRow]
+    per_pair_robusto: dict[str, bool]
+    conclusion: RotationConclusion
+
+
+class ResearchExperimentsResponse(BaseModel):
+    """Respuesta de `GET /api/research-experiments`: los resultados YA
+    guardados de RL y rotación, cada uno `None` si ese experimento nunca se
+    corrió (degrada con gracia — el endpoint no falla, el frontend muestra
+    "experimento no corrido aún").
+    """
+
+    rl: RlResearchResult | None
+    rotation: RotationResearchResult | None
+
+
 class RefreshResponse(BaseModel):
     """Respuesta de `POST /api/refresh` — resultado de `data.snapshot.update_snapshot`."""
 

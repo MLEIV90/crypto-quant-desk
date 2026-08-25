@@ -384,6 +384,107 @@ export interface PairDetailResponse {
   backtest: PairBacktestResult;
 }
 
+export interface RlParams {
+  assets: string[];
+  min_train_days: number;
+  n_blocks: number;
+  seeds: number[];
+  total_timesteps: number;
+  cost_bps: number;
+}
+
+export interface RlBlock {
+  train_start: number;
+  train_end: number;
+  test_start: number;
+  test_end: number;
+}
+
+export interface RlSummaryRow {
+  estrategia: string;
+  sharpe_media: number;
+  sharpe_std: number;
+  retorno_anualizado_media: number;
+  retorno_anualizado_std: number;
+  retorno_total_media: number;
+  retorno_total_std: number;
+  max_drawdown_media: number;
+  max_drawdown_std: number;
+  turnover_total_media: number;
+  turnover_total_std: number;
+  turnover_medio_diario_media: number;
+  turnover_medio_diario_std: number;
+}
+
+export interface RlConclusion {
+  supera_a_todos_los_baselines_consistentemente: boolean;
+  sharpe_rl_peor_semilla: number;
+  sharpe_rl_mejor_semilla: number;
+  sharpe_baselines: Record<string, number>;
+}
+
+export interface RlResearchResult {
+  fecha_experimento: string;
+  params: RlParams;
+  elapsed_seconds: number;
+  n_ppo_runs: number;
+  oos_date_range: [string, string];
+  blocks: RlBlock[];
+  summary_table: RlSummaryRow[];
+  conclusion: RlConclusion;
+}
+
+export interface RotationParams {
+  pairs: string[];
+  lookback_grid: number[];
+  rebalance_grid: number[];
+  cost_bps: number | null;
+  primary_pair: string;
+}
+
+export interface RotationSummaryRow {
+  par: string;
+  lookback_days: number;
+  rebalance_days: number;
+  sharpe_rotacion: number | null;
+  cagr_rotacion: number | null;
+  retorno_total_rotacion: number | null;
+  max_drawdown_rotacion: number | null;
+  n_rotaciones: number;
+  mejor_baseline: string;
+  sharpe_mejor_baseline: number | null;
+  gana_al_mejor_baseline: boolean;
+  sharpe_buy_hold_BTC: number | null;
+  sharpe_buy_hold_ETH: number | null;
+  sharpe_buy_hold_SOL: number | null;
+  sharpe_buy_hold_BNB: number | null;
+  sharpe_buy_hold_LTC: number | null;
+  sharpe_50_50_rebalanceado: number | null;
+}
+
+export interface RotationConclusion {
+  robusto_par_principal: boolean;
+  par_principal: string;
+  fraccion_pares_robustos: number;
+  pares_robustos: string[];
+  veredicto_global: boolean;
+}
+
+export interface RotationResearchResult {
+  fecha_experimento: string;
+  params: RotationParams;
+  elapsed_seconds: number;
+  n_combos: number;
+  summary_table: RotationSummaryRow[];
+  per_pair_robusto: Record<string, boolean>;
+  conclusion: RotationConclusion;
+}
+
+export interface ResearchExperimentsResponse {
+  rl: RlResearchResult | null;
+  rotation: RotationResearchResult | null;
+}
+
 export interface PredictionResponse {
   asset: string;
   used_onchain: boolean;

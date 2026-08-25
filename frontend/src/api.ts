@@ -23,6 +23,7 @@ import type {
   PairScreeningResponse,
   PredictionResponse,
   RefreshResponse,
+  ResearchExperimentsResponse,
   RiskResponse,
   RiskSummaryResponse,
   StatsResponse,
@@ -207,6 +208,16 @@ export function getGarchSeries(asset: string): Promise<GarchSeriesResponse> {
  */
 export function getPrediction(asset: string): Promise<PredictionResponse> {
   return apiGet<PredictionResponse>("/api/prediction", { asset });
+}
+
+/**
+ * Fase 24: LEE (no recalcula) los resultados YA guardados de los
+ * experimentos de Deep RL y rotación por momentum — rápido (un archivo
+ * JSON chico), a diferencia de `getPrediction`. `rl`/`rotation` vienen en
+ * `null` si ese experimento nunca se corrió.
+ */
+export function getResearchExperiments(): Promise<ResearchExperimentsResponse> {
+  return apiGet<ResearchExperimentsResponse>("/api/research-experiments");
 }
 
 /** Solo lee el snapshot local (rápido, sin red) — ver `api/main.py`. */

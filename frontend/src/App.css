@@ -1140,6 +1140,52 @@
   overflow: visible;
 }
 
+/* Variante horizontal (Fase 24, vista "Research") — filas en vez de columnas. */
+.bar-chart--horizontal {
+  gap: 6px;
+}
+
+.bar-chart__hrow {
+  display: grid;
+  grid-template-columns: minmax(90px, 30%) 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.bar-chart__hlabel {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-chart__htrack {
+  position: relative;
+  height: 14px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar-chart__hbar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  min-width: 2px;
+}
+
+.bar-chart__hvalue {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  text-align: right;
+  min-width: 3.5ch;
+}
+
 /* ---------------------------------------------------------------------
    Histograma de retornos (Fase 20a, vista "Riesgo")
    --------------------------------------------------------------------- */

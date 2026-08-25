@@ -5,6 +5,13 @@
  * no series temporales, así que no encajan en `lightweight-charts` (que
  * exige un eje de tiempo real, ver `Chart.tsx`/`LineChartPanel.tsx`) — CSS
  * puro en vez de forzar una librería de gráficos financieros para esto.
+ *
+ * `horizontal` (Fase 24, vista "Research"): variante de filas horizontales
+ * en vez de columnas verticales — pensada para listas cortas de valores NO
+ * divergentes (todos positivos, p. ej. importancia de features o accuracy
+ * vs. baselines), donde una barra horizontal con el valor al lado se lee
+ * más directo que una columna que solo usa la mitad superior del alto
+ * disponible. Mismo `BarChartDatum`, sin cambiar el modo vertical existente.
  */
 
 import { COLORS } from "../theme";
@@ -20,6 +27,9 @@ interface BarChartProps {
   height?: number;
   positiveColor?: string;
   negativeColor?: string;
+  horizontal?: boolean;
+  /** Solo para `horizontal`: formatea el valor mostrado al final de cada barra. */
+  formatValue?: (value: number) => string;
 }
 
 export function BarChart({
@@ -27,8 +37,30 @@ export function BarChart({
   height = 160,
   positiveColor = COLORS.success,
   negativeColor = COLORS.danger,
+  horizontal = false,
+  formatValue,
 }: BarChartProps) {
   const maxAbs = Math.max(...data.map((d) => Math.abs(d.value)), 1e-9);
+
+  if (horizontal) {
+    return (
+      <div className="bar-chart bar-chart--horizontal">
+        {data.map((d, index) => {
+          const pct = (Math.abs(d.value) / maxAbs) * 100;
+          const color = d.value >= 0 ? positiveColor : negativeColor;
+          return (
+            <div key={`${d.label}-${index}`} className="bar-chart__hrow" title={d.title}>
+              <span className="bar-chart__hlabel">{d.label}</span>
+              <div className="bar-chart__htrack">
+                <div className="bar-chart__hbar" style={{ width: `${pct}%`, background: color }} />
+              </div>
+              <span className="bar-chart__hvalue">{formatValue ? formatValue(d.value) : d.value.toFixed(2)}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="bar-chart">

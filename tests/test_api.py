@@ -12,6 +12,7 @@ tarde más de lo necesario.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -588,6 +589,97 @@ def test_get_prediction_unknown_asset_returns_404() -> None:
     response = client.get("/api/prediction", params={"asset": "DOGE"})
 
     assert response.status_code == 404
+
+
+# --------------------------------------------------------------------------
+# /api/research-experiments (Fase 24) — LEE resultados guardados, no entrena/corre nada
+# --------------------------------------------------------------------------
+
+
+def test_get_research_experiments_returns_saved_rl_and_rotation_results() -> None:
+    # Usa los archivos REALES ya guardados en rl/results/ y strategies/results/
+    # (mismo criterio que el resto del proyecto: sin mocks cuando hay datos
+    # reales disponibles) — si algún día no existen, el otro test de acá
+    # abajo cubre el degradado con gracia.
+    response = client.get("/api/research-experiments")
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["rl"] is not None
+    assert body["rl"]["conclusion"]["supera_a_todos_los_baselines_consistentemente"] is False
+    estrategias = {row["estrategia"] for row in body["rl"]["summary_table"]}
+    assert "RL (PPO)" in estrategias
+    assert body["rl"]["fecha_experimento"] is not None
+
+    assert body["rotation"] is not None
+    assert body["rotation"]["conclusion"]["veredicto_global"] is False
+    assert 0.0 <= body["rotation"]["conclusion"]["fraccion_pares_robustos"] <= 1.0
+    # NaN del JSON original saneado a None (Fase 24, ver _nan_to_none) — nunca
+    # un NaN no estándar en la respuesta HTTP.
+    for row in body["rotation"]["summary_table"]:
+        for key, value in row.items():
+            assert not (isinstance(value, float) and value != value), f"{key} vino NaN sin sanear"
+
+
+def test_get_research_experiments_degrades_gracefully_when_no_results_saved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api_main, "RL_RESULTS_DIR", tmp_path / "rl_vacio")
+    monkeypatch.setattr(api_main, "ROTATION_RESULTS_DIR", tmp_path / "rotation_vacio")
+
+    response = client.get("/api/research-experiments")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rl"] is None
+    assert body["rotation"] is None
+
+
+def test_get_research_experiments_picks_the_most_recent_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rl_dir = tmp_path / "rl_results"
+    rl_dir.mkdir()
+    old_payload = {
+        "params": {
+            "assets": ["BTC"], "min_train_days": 730, "n_blocks": 1,
+            "seeds": [0], "total_timesteps": 100, "cost_bps": 10.0,
+        },
+        "elapsed_seconds": 1.0,
+        "n_ppo_runs": 1,
+        "oos_date_range": ["2020-01-01", "2020-02-01"],
+        "blocks": [{"train_start": 0, "train_end": 10, "test_start": 10, "test_end": 20}],
+        "summary_table": [
+            {
+                "estrategia": "RL (PPO)", "sharpe_media": 0.1, "sharpe_std": 0.0,
+                "retorno_anualizado_media": 0.0, "retorno_anualizado_std": 0.0,
+                "retorno_total_media": 0.0, "retorno_total_std": 0.0,
+                "max_drawdown_media": 0.0, "max_drawdown_std": 0.0,
+                "turnover_total_media": 0.0, "turnover_total_std": 0.0,
+                "turnover_medio_diario_media": 0.0, "turnover_medio_diario_std": 0.0,
+            }
+        ],
+        "conclusion": {
+            "supera_a_todos_los_baselines_consistentemente": False,
+            "sharpe_rl_peor_semilla": 0.1, "sharpe_rl_mejor_semilla": 0.1,
+            "sharpe_baselines": {},
+        },
+    }
+    new_payload = json.loads(json.dumps(old_payload))
+    new_payload["conclusion"]["sharpe_rl_peor_semilla"] = 0.99
+
+    (rl_dir / "rl_experiment_20200101_000000.json").write_text(json.dumps(old_payload), encoding="utf-8")
+    (rl_dir / "rl_experiment_20260101_000000.json").write_text(json.dumps(new_payload), encoding="utf-8")
+    monkeypatch.setattr(api_main, "RL_RESULTS_DIR", rl_dir)
+    monkeypatch.setattr(api_main, "ROTATION_RESULTS_DIR", tmp_path / "rotation_vacio")
+
+    response = client.get("/api/research-experiments")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rl"]["conclusion"]["sharpe_rl_peor_semilla"] == pytest.approx(0.99)
+    assert body["rl"]["fecha_experimento"].startswith("2026-01-01")
 
 
 # --------------------------------------------------------------------------
@@ -1274,6 +1366,7 @@ def test_docs_and_openapi_schema_are_available() -> None:
     assert set(paths.keys()) == {
         "/api/assets", "/api/ohlcv", "/api/studies", "/api/suggester",
         "/api/risk", "/api/backtest", "/api/backtest-strategies", "/api/garch-series", "/api/prediction",
+        "/api/research-experiments",
         "/api/data-status", "/api/refresh", "/api/stats", "/api/compare",
         "/api/pairs/screening", "/api/pairs/detail", "/api/volume-profile", "/api/correlation",
         "/api/report", "/api/export/ohlcv", "/api/export/drawdowns", "/api/export/correlation",
