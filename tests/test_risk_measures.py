@@ -11,6 +11,7 @@ from metrics.risk_measures import (
     annualized_return,
     annualized_volatility,
     calmar_ratio,
+    drawdown_series,
     equity_curve,
     expected_shortfall,
     historical_percentile,
@@ -50,6 +51,29 @@ def test_max_drawdown_detects_known_drop() -> None:
 def test_calmar_ratio_is_inf_when_no_drawdown() -> None:
     r = pd.Series([0.01] * 50)
     assert calmar_ratio(r) == np.inf
+
+
+def test_drawdown_series_matches_max_drawdown_at_its_minimum() -> None:
+    # Fase 21 (gráfico underwater): drawdown_series es la curva completa
+    # detrás del escalar max_drawdown — su mínimo tiene que coincidir.
+    r = pd.Series([0.10, -0.10, 0.05, -0.20, 0.30])
+    dd = drawdown_series(r)
+    assert dd.min() == pytest.approx(max_drawdown(r))
+
+
+def test_drawdown_series_is_never_positive() -> None:
+    rng = np.random.default_rng(0)
+    r = pd.Series(rng.normal(0.0005, 0.02, 300))
+    dd = drawdown_series(r)
+    assert (dd <= 1e-12).all()
+
+
+def test_drawdown_series_is_zero_at_new_peaks() -> None:
+    r = pd.Series([0.10, 0.10, -0.05, 0.20])  # picos nuevos en índices 0, 1 y 3
+    dd = drawdown_series(r)
+    assert dd.iloc[0] == pytest.approx(0.0)
+    assert dd.iloc[1] == pytest.approx(0.0)
+    assert dd.iloc[3] == pytest.approx(0.0)
 
 
 # --------------------------------------------------------------------------

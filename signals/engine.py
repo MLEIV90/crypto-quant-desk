@@ -222,6 +222,55 @@ def generate_positions(
     return positions
 
 
+def generate_positions_vol_targeting(
+    prices: pd.DataFrame,
+    target_vol: float | None = None,
+    vol_window: int | None = None,
+) -> pd.Series:
+    """Estrategia "vol targeting puro" (Fase 21, pestaña Backtest): SIEMPRE
+    largo (direction=1) — a diferencia de `generate_positions`, esta función
+    NO usa el score direccional del engine, no intenta adivinar si conviene
+    estar largo o corto. Solo ajusta el TAMAÑO de la posición según la
+    volatilidad realizada reciente, vía `size_from_volatility` (la misma
+    pieza de sizing que usa `generate_positions`, reutilizada tal cual).
+    """
+    if vol_window is None:
+        vol_window = VOL_WINDOW
+
+    asset_returns = simple_returns(prices["close"])
+    realized_vol = asset_returns.rolling(window=vol_window).std(ddof=1) * np.sqrt(PERIODS_PER_YEAR)
+    positions = size_from_volatility(realized_vol, target_vol=target_vol).clip(0.0, MAX_LEVERAGE)
+    positions.name = "position"
+    return positions
+
+
+def generate_positions_engine_signal(
+    prices: pd.DataFrame,
+    weights: dict[str, float] | None = None,
+    allow_short: bool | None = None,
+) -> pd.Series:
+    """Estrategia "señal del engine de consenso" (Fase 21, pestaña Backtest):
+    la dirección técnica compuesta (trend/momentum/mean-reversion -> score
+    -> zona muerta, ver `compute_signal_components`/`composite_score`/
+    `_apply_dead_zone`), SIN vol targeting — a diferencia de
+    `generate_positions`, el tamaño de la posición es el score saturado tal
+    cual (en [-1, 1], o [0, 1] si `allow_short=False`), no ajustado por
+    volatilidad.
+    """
+    if allow_short is None:
+        allow_short = ALLOW_SHORT
+
+    components = compute_signal_components(prices)
+    score = composite_score(components, weights=weights)
+    direction = _apply_dead_zone(score)
+
+    if not allow_short:
+        direction = direction.clip(lower=0.0)
+
+    direction.name = "position"
+    return direction
+
+
 def latest_recommendation(prices: pd.DataFrame, garch_regime: bool = True) -> dict:
     """Recomendación de decisión para la ÚLTIMA vela de `prices`: la salida
     pensada para el usuario final (no para el backtester).

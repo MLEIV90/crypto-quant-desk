@@ -400,6 +400,118 @@ def test_get_backtest_returns_metrics_and_equity_curves() -> None:
     assert len(body["equity_curve_estrategia"]) > 0
     assert len(body["equity_curve_buy_and_hold"]) > 0
     assert body["equity_curve_estrategia"][0]["valor"] == pytest.approx(1.0)
+    # Fase 21: default sin `strategy` explícito sigue siendo "combo" — no
+    # debe cambiar el resumen que ya consume RiskView desde antes de esta fase.
+    assert body["strategy"] == "combo"
+    assert body["cost_bps"] == pytest.approx(10.0)
+    assert body["fecha_inicio"] is None and body["fecha_fin"] is None
+
+
+def test_get_backtest_drawdown_curves_are_never_positive_and_start_at_first_date() -> None:
+    response = client.get("/api/backtest", params={"asset": "BTC", "strategy": "vol_targeting"})
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert len(body["drawdown_curve_estrategia"]) == len(body["equity_curve_estrategia"])
+    assert all(point["valor"] <= 1e-9 for point in body["drawdown_curve_estrategia"])
+    assert all(point["valor"] <= 1e-9 for point in body["drawdown_curve_buy_and_hold"])
+
+
+def test_get_backtest_strategy_selector_gives_different_results_per_strategy() -> None:
+    responses = {
+        strategy: client.get("/api/backtest", params={"asset": "BTC", "strategy": strategy}).json()
+        for strategy in ("vol_targeting", "engine", "buy_and_hold")
+    }
+
+    for strategy, body in responses.items():
+        assert body["strategy"] == strategy
+
+    # buy_and_hold como "control": la estrategia debe coincidir con su
+    # propio benchmark (misma posición constante = 1 en ambos lados).
+    bh = responses["buy_and_hold"]
+    assert bh["metrics_estrategia"]["cagr"] == pytest.approx(bh["metrics_buy_and_hold"]["cagr"])
+
+    # vol targeting (siempre largo, tamaño variable) y el engine (dirección
+    # variable, tamaño fijo) son estrategias genuinamente distintas sobre el
+    # mismo activo — sus curvas de equity finales no deberían coincidir.
+    vt_final = responses["vol_targeting"]["equity_curve_estrategia"][-1]["valor"]
+    engine_final = responses["engine"]["equity_curve_estrategia"][-1]["valor"]
+    assert vt_final != pytest.approx(engine_final)
+
+
+def test_get_backtest_invalid_strategy_returns_400() -> None:
+    response = client.get("/api/backtest", params={"asset": "BTC", "strategy": "no_existe"})
+    assert response.status_code == 400
+
+
+def test_get_backtest_cost_bps_override_changes_metrics() -> None:
+    cheap = client.get("/api/backtest", params={"asset": "BTC", "strategy": "engine", "cost_bps": 0.0}).json()
+    expensive = client.get(
+        "/api/backtest", params={"asset": "BTC", "strategy": "engine", "cost_bps": 500.0}
+    ).json()
+
+    assert cheap["cost_bps"] == pytest.approx(0.0)
+    assert expensive["cost_bps"] == pytest.approx(500.0)
+    assert expensive["metrics_estrategia"]["total_return"] < cheap["metrics_estrategia"]["total_return"]
+
+
+def test_get_backtest_target_vol_changes_vol_targeting_sizing() -> None:
+    low_target = client.get(
+        "/api/backtest", params={"asset": "BTC", "strategy": "vol_targeting", "target_vol": 0.1}
+    ).json()
+    high_target = client.get(
+        "/api/backtest", params={"asset": "BTC", "strategy": "vol_targeting", "target_vol": 1.0}
+    ).json()
+
+    assert low_target["metrics_estrategia"]["exposicion_media"] < high_target["metrics_estrategia"]["exposicion_media"]
+
+
+def test_get_backtest_date_range_restricts_equity_curve() -> None:
+    full = client.get("/api/backtest", params={"asset": "BTC", "strategy": "engine"}).json()
+    fecha_inicio = full["equity_curve_estrategia"][len(full["equity_curve_estrategia"]) // 2]["fecha"][:10]
+
+    windowed = client.get(
+        "/api/backtest",
+        params={"asset": "BTC", "strategy": "engine", "fecha_inicio": fecha_inicio},
+    ).json()
+
+    assert len(windowed["equity_curve_estrategia"]) < len(full["equity_curve_estrategia"])
+    assert windowed["equity_curve_estrategia"][0]["valor"] == pytest.approx(1.0)
+    assert windowed["fecha_inicio"] is not None
+
+
+def test_get_backtest_invalid_date_range_returns_400() -> None:
+    response = client.get(
+        "/api/backtest", params={"asset": "BTC", "strategy": "engine", "fecha_inicio": "no-es-una-fecha"}
+    )
+    assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------
+# /api/backtest-strategies
+# --------------------------------------------------------------------------
+
+
+def test_get_backtest_strategies_lists_the_required_strategies() -> None:
+    response = client.get("/api/backtest-strategies")
+
+    assert response.status_code == 200
+    body = response.json()
+
+    ids = {row["id"] for row in body["estrategias"]}
+    assert {"vol_targeting", "engine", "buy_and_hold"}.issubset(ids)
+    assert body["cost_bps_default"] == pytest.approx(10.0)
+
+    for row in body["estrategias"]:
+        assert row["descripcion"]
+        assert row["objetivo"]
+        assert row["tradeoff"]
+        if row["tiene_target_vol"]:
+            assert row["target_vol_default"] is not None
+            assert row["target_vol_min"] < row["target_vol_default"] < row["target_vol_max"]
+        else:
+            assert row["target_vol_default"] is None
 
 
 # --------------------------------------------------------------------------
@@ -1140,7 +1252,7 @@ def test_docs_and_openapi_schema_are_available() -> None:
     paths = openapi_response.json()["paths"]
     assert set(paths.keys()) == {
         "/api/assets", "/api/ohlcv", "/api/studies", "/api/suggester",
-        "/api/risk", "/api/backtest", "/api/garch-series", "/api/prediction",
+        "/api/risk", "/api/backtest", "/api/backtest-strategies", "/api/garch-series", "/api/prediction",
         "/api/data-status", "/api/refresh", "/api/stats", "/api/compare",
         "/api/pairs/screening", "/api/pairs/detail", "/api/volume-profile", "/api/correlation",
         "/api/report", "/api/export/ohlcv", "/api/export/drawdowns", "/api/export/correlation",

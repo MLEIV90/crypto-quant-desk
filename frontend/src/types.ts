@@ -149,10 +149,35 @@ export interface EquityPoint {
 
 export interface BacktestResponse {
   asset: string;
+  /** Fase 21: eco de los parámetros efectivamente aplicados (incluye defaults). */
+  strategy: string;
+  cost_bps: number;
+  fecha_inicio: string | null;
+  fecha_fin: string | null;
   metrics_estrategia: Record<string, number>;
   metrics_buy_and_hold: Record<string, number>;
   equity_curve_estrategia: EquityPoint[];
   equity_curve_buy_and_hold: EquityPoint[];
+  /** Fase 21: curva "underwater" completa (siempre <= 0) de cada lado. */
+  drawdown_curve_estrategia: EquityPoint[];
+  drawdown_curve_buy_and_hold: EquityPoint[];
+}
+
+export interface BacktestStrategyInfo {
+  id: string;
+  nombre: string;
+  descripcion: string;
+  objetivo: string;
+  tradeoff: string;
+  tiene_target_vol: boolean;
+  target_vol_default: number | null;
+  target_vol_min: number | null;
+  target_vol_max: number | null;
+}
+
+export interface BacktestStrategiesResponse {
+  estrategias: BacktestStrategyInfo[];
+  cost_bps_default: number;
 }
 
 export interface GarchSeriesResponse {

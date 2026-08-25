@@ -192,17 +192,30 @@ def equity_curve(r: pd.Series, initial_value: float = 1.0) -> pd.Series:
     return initial_value * (1.0 + r.fillna(0.0)).cumprod()
 
 
+def drawdown_series(r: pd.Series) -> pd.Series:
+    """Curva "underwater" completa: en cada fecha, cuánto por debajo del
+    máximo histórico previo de la equity curve está el capital, como número
+    NEGATIVO o cero (p. ej. -0.20 = -20% respecto del pico anterior; 0.0 en
+    los picos nuevos). Es la serie completa detrás del escalar
+    `max_drawdown` (Fase 21: graficarla es lo que deja VER por qué una
+    estrategia sufre menos que otra, no solo su peor valor puntual).
+    """
+    r = r.dropna()
+    if len(r) == 0:
+        return r
+    equity = equity_curve(r)
+    running_max = equity.cummax()
+    return equity / running_max - 1.0
+
+
 def max_drawdown(r: pd.Series) -> float:
     """Máxima caída porcentual de la equity curve desde un máximo histórico
     previo, reportada como número NEGATIVO o cero (p. ej. -0.20 = caída del
     20%; 0.0 si la equity curve nunca cae por debajo de un máximo previo).
     """
-    r = r.dropna()
-    if len(r) == 0:
+    drawdown = drawdown_series(r)
+    if len(drawdown) == 0:
         return np.nan
-    equity = equity_curve(r)
-    running_max = equity.cummax()
-    drawdown = equity / running_max - 1.0
     return drawdown.min()
 
 

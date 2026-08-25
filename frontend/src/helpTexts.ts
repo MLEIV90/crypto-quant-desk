@@ -133,9 +133,34 @@ export const SUGGESTER_HELP =
   "más entre varios, no como una orden de operar.";
 
 export const BACKTEST_EQUITY_HELP =
-  "Evolución de $1 invertido desde el inicio del período, para la estrategia del engine y para comprar-y-mantener " +
+  "Evolución de $1 invertido desde el inicio del período, para la estrategia elegida y para comprar-y-mantener " +
   "en paralelo. Muestra CÓMO se llegó al resultado final (con qué subidas y caídas en el camino), no solo el " +
-  "número final.";
+  "número final. Usá la escala logarítmica si una de las dos curvas aplasta visualmente a la otra.";
+
+export const BACKTEST_LOG_SCALE_HELP =
+  "En escala LINEAL, una curva que llegó mucho más alto (p. ej. buy & hold en un mercado alcista largo) aplasta " +
+  "visualmente a la otra, aunque ambas hayan tenido tramos interesantes. En escala LOGARÍTMICA, la misma variación " +
+  "porcentual ocupa el mismo espacio vertical en cualquier nivel — así se puede comparar el COMPORTAMIENTO de las " +
+  "dos curvas (qué tan volátil fue cada una, dónde cayó cada una) y no solo cuál terminó más arriba.";
+
+export const BACKTEST_DRAWDOWN_HELP =
+  "El gráfico de arriba (equity) muestra hacia dónde fue el capital; este muestra cuánto se estaba perdiendo en " +
+  "CADA momento respecto del pico anterior — 0% en un máximo nuevo, más negativo cuanto más profunda la caída en " +
+  "curso. Es la vista 'bajo el agua' (underwater) del drawdown: donde la curva de una estrategia se mantiene cerca " +
+  "de 0% casi todo el tiempo y la de la otra pasa largos tramos muy abajo, ESO es la diferencia real entre sufrir " +
+  "una caída del 15% y sufrir una del 80%, aunque el retorno final de ambas fuera parecido.";
+
+export const BACKTEST_STRATEGY_SELECTOR_HELP =
+  "Las tres estrategias reutilizan las mismas piezas del motor de señales (`signals.engine`) combinadas de forma " +
+  "distinta — ninguna es un modelo nuevo entrenado para esta vista. Comparalas contra buy & hold (el control: " +
+  "siempre 100% invertido, sin señal de ningún tipo) para ver si de verdad aportan algo, y entre sí para ver qué " +
+  "problema resuelve cada una.";
+
+export const BACKTEST_PARAMS_HELP =
+  "El costo de transacción (en basis points, 1 bp = 0.01%) se cobra sobre cada cambio de tamaño de posición — " +
+  "estrategias que operan más seguido son más sensibles a subirlo. El rango de fechas recorta la VENTANA del " +
+  "backtest después de calcular la señal sobre todo el histórico disponible, así que no genera un 'arranque en " +
+  "frío' artificial al principio del rango elegido.";
 
 export const WATCHLIST_HELP =
   "Precio de cierre más reciente y variación % contra la vela diaria anterior de cada activo. Es el cambio " +
@@ -143,13 +168,13 @@ export const WATCHLIST_HELP =
   "recién actualizados — mirá el punto ámbar y 'Actualizar datos' arriba.";
 
 export const BACKTEST_METRIC_HELP: Record<string, string> = {
-  cagr: "Crecimiento anual compuesto: a qué tasa anual equivalente creció el capital en promedio durante el período.",
-  sharpe: "Retorno ajustado por riesgo: cuánto retorno se obtuvo por unidad de volatilidad asumida. Más alto es mejor; no distingue una caída brusca de una subida brusca.",
-  sortino: "Como el Sharpe, pero solo penaliza la volatilidad A LA BAJA — las subidas bruscas no lo perjudican.",
-  max_drawdown: "La peor caída, de punta a punta, desde un máximo hasta el mínimo posterior en todo el período — cuánto tuviste que aguantar en el peor momento.",
-  calmar: "Retorno anualizado dividido por el máximo drawdown: cuánto retorno obtuviste por cada unidad de 'dolor' de la peor caída.",
-  n_trades: "Cantidad de operaciones (cambios de posición) que ejecutó la estrategia durante el período.",
-  turnover_total: "Cuánto 'movimiento' de posición hubo en total — más turnover implica más costos de transacción reales.",
+  cagr: "Crecimiento anual compuesto: a qué tasa anual equivalente creció el capital en promedio durante el período. Más alto es mejor.",
+  sharpe: "Retorno ajustado por riesgo: cuánto retorno se obtuvo por unidad de volatilidad asumida. Más alto es mejor; no distingue una caída brusca de una subida brusca (ver Sortino).",
+  sortino: "Como el Sharpe, pero solo penaliza la volatilidad A LA BAJA — las subidas bruscas no lo perjudican. Más alto es mejor.",
+  max_drawdown: "La peor caída, de punta a punta, desde un máximo hasta el mínimo posterior en todo el período — cuánto tuviste que aguantar en el peor momento. Se expresa como número negativo: más cerca de 0% es mejor (menos dolor).",
+  calmar: "Retorno anualizado dividido por el máximo drawdown: cuánto retorno obtuviste por cada unidad de 'dolor' de la peor caída. Más alto es mejor.",
+  n_trades: "Cantidad de operaciones (cambios de posición) que ejecutó la estrategia durante el período. Ni mejor ni peor por sí solo, pero más operaciones implica más costos reales de transacción.",
+  turnover_total: "Cuánto 'movimiento' de posición hubo en total — más turnover implica más costos de transacción reales. Más bajo es mejor en igualdad de retorno, no es un fin en sí mismo.",
 };
 
 export const PERIOD_SELECTOR_HELP =

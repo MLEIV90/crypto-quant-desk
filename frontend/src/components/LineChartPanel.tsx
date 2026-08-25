@@ -21,7 +21,15 @@
  */
 
 import { useEffect, useRef } from "react";
-import { ColorType, createChart, createSeriesMarkers, CrosshairMode, LineSeries, LineStyle } from "lightweight-charts";
+import {
+  ColorType,
+  createChart,
+  createSeriesMarkers,
+  CrosshairMode,
+  LineSeries,
+  LineStyle,
+  PriceScaleMode,
+} from "lightweight-charts";
 import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from "lightweight-charts";
 import { COLORS } from "../theme";
 
@@ -52,13 +60,18 @@ interface LineChartPanelProps {
   series: LineSeriesSpec[];
   height?: number;
   referenceLines?: ReferenceLineSpec[];
+  /** Fase 21 (equity curve del Backtest): escala logarítmica del eje de
+   * precio en vez de lineal — para que una serie que crece mucho más que
+   * otra (p. ej. buy & hold vs. una estrategia con vol targeting) no
+   * aplaste visualmente a la más chica. Default lineal (`false`). */
+  logScale?: boolean;
 }
 
 function toTimestamp(iso: string): UTCTimestamp {
   return Math.floor(new Date(iso).getTime() / 1000) as UTCTimestamp;
 }
 
-export function LineChartPanel({ series, height = 320, referenceLines = [] }: LineChartPanelProps) {
+export function LineChartPanel({ series, height = 320, referenceLines = [], logScale = false }: LineChartPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesApiRef = useRef<ISeriesApi<"Line", Time>[]>([]);
@@ -137,6 +150,14 @@ export function LineChartPanel({ series, height = 320, referenceLines = [] }: Li
 
     chart.timeScale().fitContent();
   }, [series, referenceLines]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.priceScale("right").applyOptions({
+      mode: logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+    });
+  }, [logScale]);
 
   return <div ref={containerRef} className="chart-container" style={{ height }} />;
 }

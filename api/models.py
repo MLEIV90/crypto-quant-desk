@@ -252,16 +252,61 @@ class EquityPoint(BaseModel):
 
 
 class BacktestResponse(BaseModel):
-    """Respuesta de `GET /api/backtest`: métricas + curvas de equity de la
-    estrategia del engine vs. buy & hold, ambas con costos de transacción
-    (ver `backtest/engine.py`).
+    """Respuesta de `GET /api/backtest`: métricas + curvas de equity y de
+    drawdown de la estrategia elegida vs. buy & hold, ambas con costos de
+    transacción (ver `backtest/engine.py`).
+
+    `strategy`/`cost_bps`/`fecha_inicio`/`fecha_fin` (Fase 21) son un ECO de
+    los parámetros efectivamente aplicados (incluyendo los defaults que se
+    hayan usado cuando no se pasaron) — así el frontend siempre puede
+    mostrar exactamente qué se corrió sin tener que duplicar los defaults
+    del backend. `drawdown_curve_*` (Fase 21): la curva "underwater"
+    completa (`metrics.risk_measures.drawdown_series`) de cada lado, para el
+    gráfico que muestra POR QUÉ una estrategia sufre menos que la otra, no
+    solo su peor valor puntual (ya en `metrics_*["max_drawdown"]`).
     """
 
     asset: str
+    strategy: str
+    cost_bps: float
+    fecha_inicio: datetime | None
+    fecha_fin: datetime | None
     metrics_estrategia: dict[str, float]
     metrics_buy_and_hold: dict[str, float]
     equity_curve_estrategia: list[EquityPoint]
     equity_curve_buy_and_hold: list[EquityPoint]
+    drawdown_curve_estrategia: list[EquityPoint]
+    drawdown_curve_buy_and_hold: list[EquityPoint]
+
+
+class BacktestStrategyInfo(BaseModel):
+    """Descripción de una estrategia backtesteable vía `GET /api/backtest`
+    (Fase 21) — la MISMA fuente que usa el backend para calcular, expuesta
+    como datos para que el selector del frontend nunca tenga que hardcodear
+    (y arriesgarse a desincronizar) una explicación de lo que la estrategia
+    realmente hace.
+    """
+
+    id: str
+    nombre: str
+    descripcion: str
+    objetivo: str
+    tradeoff: str
+    tiene_target_vol: bool
+    target_vol_default: float | None
+    target_vol_min: float | None
+    target_vol_max: float | None
+
+
+class BacktestStrategiesResponse(BaseModel):
+    """Respuesta de `GET /api/backtest-strategies`: catálogo de estrategias
+    + el default de costos de transacción, para poblar el selector y los
+    parámetros configurables de la pestaña Backtest sin hardcodear nada del
+    backend en el frontend.
+    """
+
+    estrategias: list[BacktestStrategyInfo]
+    cost_bps_default: float
 
 
 class GarchSeriesResponse(BaseModel):

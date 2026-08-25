@@ -11,6 +11,8 @@ from signals.engine import (
     compute_signal_components,
     composite_score,
     generate_positions,
+    generate_positions_engine_signal,
+    generate_positions_vol_targeting,
     latest_recommendation,
     size_from_volatility,
 )
@@ -174,3 +176,70 @@ def test_latest_recommendation_with_garch_regime_adds_expected_keys() -> None:
     assert "vol_garch" in rec and "regimen" in rec
     assert rec["vol_garch"] > 0
     assert rec["regimen"] in ("calma", "normal", "tension", None)
+
+
+# --------------------------------------------------------------------------
+# Fase 21: estrategias "puras" para el selector de la pestaña Backtest
+# --------------------------------------------------------------------------
+
+
+def test_generate_positions_vol_targeting_is_always_long_only() -> None:
+    # Tendencia bajista fuerte: si esto mirara la dirección, daría posiciones
+    # negativas (ver test_strong_downtrend_gives_negative_trend) — vol
+    # targeting puro NO debe, por diseño, adivinar la dirección.
+    df = _synthetic_ohlcv(n=400, drift=-0.02)
+    positions = generate_positions_vol_targeting(df)
+    assert (positions.dropna() >= 0.0).all()
+
+
+def test_generate_positions_vol_targeting_shrinks_size_when_vol_rises() -> None:
+    # Dos tramos: calmo primero, agitado después (mismo patrón que el test
+    # de coherencia de riesgo de Fase 20c) — el tamaño de posición promedio
+    # del tramo agitado debe ser menor.
+    rng = np.random.default_rng(1)
+    calm = rng.normal(0.0, 0.005, 300)
+    stressed = rng.normal(0.0, 0.05, 300)
+    close = 100.0 * np.exp(np.cumsum(np.concatenate([calm, stressed])))
+    idx = pd.date_range("2020-01-01", periods=600, freq="D", tz="UTC")
+    df = pd.DataFrame({"open": close, "high": close, "low": close, "close": close, "volume": 1000.0}, index=idx)
+
+    positions = generate_positions_vol_targeting(df)
+    calm_size = positions.iloc[100:300].mean()
+    stressed_size = positions.iloc[400:600].mean()
+    assert stressed_size < calm_size
+
+
+def test_generate_positions_vol_targeting_respects_max_leverage_default() -> None:
+    df = _synthetic_ohlcv(n=300, drift=0.0)
+    positions = generate_positions_vol_targeting(df, target_vol=0.3)
+    assert positions.max() <= 1.0 + 1e-9  # MAX_LEVERAGE por defecto
+
+
+def test_generate_positions_engine_signal_has_no_vol_sizing() -> None:
+    # A diferencia de generate_positions (combo), la magnitud acá es
+    # directamente el score saturado: nunca puede superar 1.0 en valor
+    # absoluto, sea cual sea la volatilidad del activo.
+    df = _synthetic_ohlcv(n=400, drift=0.02)
+    positions = generate_positions_engine_signal(df)
+    assert (positions.dropna().abs() <= 1.0 + 1e-9).all()
+
+
+def test_generate_positions_engine_signal_matches_dead_zone_direction() -> None:
+    # La dirección de la señal pura del engine debe coincidir en signo con
+    # generate_positions (combo) salvo por el sizing — mismo score
+    # subyacente, ver compute_signal_components/composite_score.
+    df = _synthetic_ohlcv(n=400, drift=0.02)
+    engine_only = generate_positions_engine_signal(df).dropna()
+    combo = generate_positions(df).dropna()
+
+    both_nonzero = (engine_only != 0.0) & (combo != 0.0)
+    assert (np.sign(engine_only[both_nonzero]) == np.sign(combo[both_nonzero])).all()
+
+
+def test_generate_positions_engine_signal_allow_short_false_never_negative() -> None:
+    df = _synthetic_ohlcv(n=400, drift=-0.02)
+    positions_with_short = generate_positions_engine_signal(df, allow_short=True)
+    positions_without_short = generate_positions_engine_signal(df, allow_short=False)
+
+    assert (positions_with_short.dropna() < 0.0).any()
+    assert (positions_without_short.dropna() >= 0.0).all()

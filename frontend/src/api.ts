@@ -13,6 +13,7 @@
 import type {
   AssetsResponse,
   BacktestResponse,
+  BacktestStrategiesResponse,
   CompareResponse,
   CorrelationResponse,
   DataStatusResponse,
@@ -167,8 +168,31 @@ export function getRiskSummary(): Promise<RiskSummaryResponse> {
   return apiGet<RiskSummaryResponse>("/api/risk-summary");
 }
 
-export function getBacktest(asset: string): Promise<BacktestResponse> {
-  return apiGet<BacktestResponse>("/api/backtest", { asset });
+/** Parámetros configurables del backtest (Fase 21) — todos opcionales, el
+ * backend aplica sus propios defaults cuando se omiten (ver
+ * `BacktestResponse.strategy`/`cost_bps`/`fecha_inicio`/`fecha_fin`, que
+ * devuelven lo efectivamente usado).
+ */
+export interface BacktestParams {
+  strategy?: string;
+  costBps?: number;
+  targetVol?: number;
+  fechaInicio?: string;
+  fechaFin?: string;
+}
+
+export function getBacktest(asset: string, params: BacktestParams = {}): Promise<BacktestResponse> {
+  const query: Record<string, string | number> = { asset };
+  if (params.strategy !== undefined) query.strategy = params.strategy;
+  if (params.costBps !== undefined) query.cost_bps = params.costBps;
+  if (params.targetVol !== undefined) query.target_vol = params.targetVol;
+  if (params.fechaInicio !== undefined) query.fecha_inicio = params.fechaInicio;
+  if (params.fechaFin !== undefined) query.fecha_fin = params.fechaFin;
+  return apiGet<BacktestResponse>("/api/backtest", query);
+}
+
+export function getBacktestStrategies(): Promise<BacktestStrategiesResponse> {
+  return apiGet<BacktestStrategiesResponse>("/api/backtest-strategies");
 }
 
 /** Lento (ajusta un modelo GARCH) — ver `api/main.py`. */

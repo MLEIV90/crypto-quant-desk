@@ -77,6 +77,8 @@ from api.models import (
     PairScreeningResponse,
     PairScreeningRow,
     PairStabilitySummary,
+    BacktestStrategiesResponse,
+    BacktestStrategyInfo,
     PairZscoreExtreme,
     PredictionResponse,
     RefreshResponse,
@@ -92,11 +94,12 @@ from api.models import (
     VolumeProfileResponse,
 )
 from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
-from config import PERIODS_PER_YEAR, TRANSACTION_COST_BPS, UNIVERSE, VOL_WINDOW
+from config import PERIODS_PER_YEAR, TARGET_VOL, TRANSACTION_COST_BPS, UNIVERSE, VOL_WINDOW
 from data.loaders import RESAMPLED_INTERVALS, get_prices
 from data.snapshot import GeoblockedError, last_closed_candle_open_time, update_snapshot
 from eda.eda_report import adf_test, correlation_matrix
 from metrics.risk_measures import (
+    drawdown_series,
     expected_shortfall,
     historical_percentile,
     rolling_value_at_risk,
@@ -111,7 +114,12 @@ from pairs.cointegration import engle_granger, half_life
 from pairs.signals import zscore
 from pairs.stability import rolling_cointegration, screen_pairs_stability, stability_summary
 from reports.pdf_report import build_report
-from signals.engine import generate_positions, latest_recommendation
+from signals.engine import (
+    generate_positions,
+    generate_positions_engine_signal,
+    generate_positions_vol_targeting,
+    latest_recommendation,
+)
 from signals.indicators import add_all_indicators
 from signals.returns import log_returns, simple_returns
 from signals.studies import all_studies, ichimoku, stochastic, volume_profile
@@ -145,6 +153,74 @@ RISK_ACTUAL_GARCH_BASIS_LABEL = "volatilidad condicional GARCH de hoy"
 RISK_REGIMEN_GARCH_BASIS_LABEL = f"{RISK_ROLLING_WINDOW_LABEL}, volatilidad condicional GARCH"
 RISK_SUMMARY_REGIMEN_BASIS_LABEL = f"{RISK_ROLLING_WINDOW_LABEL}, volatilidad realizada (no GARCH)"
 RISK_SUMMARY_VAR_BASIS_LABEL = f"{RISK_ROLLING_WINDOW_LABEL}, ventana móvil (no GARCH)"
+
+# Catálogo de estrategias de /api/backtest (Fase 21) — única fuente de
+# verdad para el selector del frontend: describe en criollo qué hace cada
+# una, para qué sirve y cuál es su trade-off explícito, evitando que la
+# pestaña "Backtest" muestre una curva sin explicar qué la generó. "combo"
+# es la estrategia HISTÓRICA de este endpoint (dirección del engine +
+# tamaño por vol targeting, vía `signals.engine.generate_positions`), que
+# sigue siendo el default de `GET /api/backtest` para no romper el resumen
+# de `RiskView` (sección "El valor de gestionar el riesgo", que la consume
+# sin pasar `strategy` desde antes de esta fase) — en la pestaña Backtest
+# rediseñada se ofrece como una cuarta opción, rotulada como lo que
+# realmente es, junto a las 3 pedidas explícitamente (vol targeting /
+# engine solo / buy & hold).
+DEFAULT_BACKTEST_STRATEGY = "combo"
+_TARGET_VOL_MIN = 0.10
+_TARGET_VOL_MAX = 1.50
+_BACKTEST_STRATEGY_CATALOG: dict[str, dict[str, str | bool]] = {
+    "vol_targeting": {
+        "nombre": "Vol targeting",
+        "descripcion": (
+            "Ajusta el tamaño de la posición según la volatilidad realizada reciente: invierte "
+            "menos cuando el mercado está más agitado de lo normal, buscando mantener el riesgo "
+            "estable. Siempre está LARGO (nunca corto) y no intenta adivinar la dirección del precio."
+        ),
+        "objetivo": "Mantener una exposición al riesgo pareja en el tiempo, no maximizar el retorno.",
+        "tradeoff": (
+            "En mercados alcistas fuertes y sostenidos tiende a rendir menos que buy & hold (reduce "
+            "posición justo cuando el mercado sube con volatilidad), a cambio de sufrir caídas más "
+            "chicas cuando el mercado se agita — el balance exacto entre ambas cosas depende del "
+            "activo y del período, no es una garantía: mirá los números de abajo para este caso en particular."
+        ),
+        "tiene_target_vol": True,
+    },
+    "engine": {
+        "nombre": "Señal del engine de consenso",
+        "descripcion": (
+            "Combina tendencia (EMA/MACD), momentum (RSI) y reversión a la media (Bollinger) en "
+            "un score compuesto que decide estar LARGO, corto o afuera. El tamaño de la posición "
+            "sigue la convicción del score, sin ajustar por volatilidad."
+        ),
+        "objetivo": "Anticipar la dirección del precio con un score técnico compuesto.",
+        "tradeoff": (
+            "Puede quedar mal posicionado en cambios de régimen bruscos, porque no reduce el "
+            "tamaño cuando el mercado se pone más volátil."
+        ),
+        "tiene_target_vol": False,
+    },
+    "combo": {
+        "nombre": "Engine + vol targeting (combinado)",
+        "descripcion": (
+            "La misma señal direccional del engine de consenso, pero con el tamaño de la posición "
+            "ajustado por vol targeting en vez de fijo por la convicción del score."
+        ),
+        "objetivo": "Sumar la dirección del engine con el sizing de vol targeting en una sola posición.",
+        "tradeoff": (
+            "Hereda los errores de dirección del engine Y paga el costo de operar menos en "
+            "momentos volátiles — combina los dos trade-offs, no los evita."
+        ),
+        "tiene_target_vol": True,
+    },
+    "buy_and_hold": {
+        "nombre": "Buy & hold puro (control)",
+        "descripcion": "Siempre 100% largo, sin señal ni ajuste de tamaño de ningún tipo.",
+        "objetivo": "Servir de referencia: si una estrategia no le gana a esto en lo que dice buscar, no aporta valor.",
+        "tradeoff": "Ninguno propio — es la vara de medir, no una estrategia con compromiso a evaluar.",
+        "tiene_target_vol": False,
+    },
+}
 
 # Tope de `limit` en /api/ohlcv y /api/studies (Fase 11): por encima del
 # histórico horario real más largo (~58.000 velas desde 2020, ver
@@ -727,34 +803,122 @@ def get_risk_summary() -> RiskSummaryResponse:
 # --------------------------------------------------------------------------
 
 
-@router.get("/backtest", response_model=BacktestResponse, summary="Backtest estrategia vs. buy & hold")
-def get_backtest(asset: str) -> BacktestResponse:
-    """Reutiliza `signals.engine.generate_positions`, `backtest.engine.backtest_from_prices`
-    y `compare_to_buy_and_hold` — la misma secuencia que
-    `app.workers.BacktestWorker` para la pestaña "Backtest" del cockpit.
+def _positions_for_strategy(df: pd.DataFrame, strategy: str, target_vol: float | None) -> pd.Series:
+    """Despacha a la función de posiciones correcta según `strategy` (ver
+    `_BACKTEST_STRATEGY_CATALOG`) — reutiliza tal cual las piezas ya
+    existentes en `signals.engine`, no reimplementa ninguna.
     """
-    df = _load_df(asset, DEFAULT_RISK_INTERVAL)
-    close = df["close"]
-    positions = generate_positions(df)
+    if strategy == "vol_targeting":
+        return generate_positions_vol_targeting(df, target_vol=target_vol)
+    if strategy == "engine":
+        return generate_positions_engine_signal(df)
+    if strategy == "combo":
+        return generate_positions(df, target_vol=target_vol)
+    if strategy == "buy_and_hold":
+        return pd.Series(1.0, index=df.index)
+    raise ValueError(f"estrategia desconocida: {strategy}")  # pragma: no cover — ya validada antes de llegar acá
 
-    result_estrategia = backtest_from_prices(close, positions)
+
+def _equity_points(series: pd.Series) -> list[EquityPoint]:
+    return [EquityPoint(fecha=fecha.to_pydatetime(), valor=float(valor)) for fecha, valor in series.items()]
+
+
+@router.get(
+    "/backtest",
+    response_model=BacktestResponse,
+    summary="Backtest configurable: estrategia elegida vs. buy & hold",
+)
+def get_backtest(
+    asset: str,
+    strategy: str = DEFAULT_BACKTEST_STRATEGY,
+    cost_bps: float | None = None,
+    target_vol: float | None = None,
+    fecha_inicio: str | None = None,
+    fecha_fin: str | None = None,
+) -> BacktestResponse:
+    """Reutiliza `signals.engine.generate_positions`/`generate_positions_vol_targeting`/
+    `generate_positions_engine_signal`, `backtest.engine.backtest_from_prices`
+    y `compare_to_buy_and_hold` — no reimplementa nada del motor.
+
+    `strategy` (Fase 21, default "combo" para no romper el resumen de
+    `RiskView`, ver `_BACKTEST_STRATEGY_CATALOG` para el detalle de cada
+    una): "vol_targeting" | "engine" | "combo" | "buy_and_hold".
+    `target_vol` solo aplica a las estrategias con `tiene_target_vol=True`
+    (se ignora en las demás). `fecha_inicio`/`fecha_fin` (ISO "YYYY-MM-DD",
+    opcionales) recortan la VENTANA del backtest DESPUÉS de calcular las
+    posiciones sobre el histórico completo — así el recorte no genera un
+    período de "warmup" artificial al principio de la ventana elegida.
+    """
+    if strategy not in _BACKTEST_STRATEGY_CATALOG:
+        raise HTTPException(
+            status_code=400,
+            detail=f"strategy debe ser una de {sorted(_BACKTEST_STRATEGY_CATALOG)}, recibido '{strategy}'",
+        )
+    if cost_bps is None:
+        cost_bps = TRANSACTION_COST_BPS
+
+    df_full = _load_df(asset, DEFAULT_RISK_INTERVAL)
+    positions_full = _positions_for_strategy(df_full, strategy, target_vol)
+    close_full = df_full["close"]
+
+    if fecha_inicio is not None or fecha_fin is not None:
+        try:
+            close = close_full.loc[fecha_inicio:fecha_fin]
+            positions = positions_full.loc[fecha_inicio:fecha_fin]
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"fecha_inicio/fecha_fin inválidas: {exc}") from exc
+        if close.empty:
+            raise HTTPException(status_code=400, detail="No hay datos en el rango de fechas pedido")
+    else:
+        close = close_full
+        positions = positions_full
+
+    result_estrategia = backtest_from_prices(close, positions, cost_bps=cost_bps)
     asset_returns = simple_returns(close)
-    comparacion = compare_to_buy_and_hold(asset_returns, result_estrategia)
-    result_buy_and_hold = backtest_from_prices(close, 1.0)
+    comparacion = compare_to_buy_and_hold(asset_returns, result_estrategia, cost_bps=cost_bps)
+    result_buy_and_hold = backtest_from_prices(close, 1.0, cost_bps=cost_bps)
 
     return BacktestResponse(
         asset=asset,
+        strategy=strategy,
+        cost_bps=cost_bps,
+        fecha_inicio=pd.Timestamp(fecha_inicio).to_pydatetime() if fecha_inicio else None,
+        fecha_fin=pd.Timestamp(fecha_fin).to_pydatetime() if fecha_fin else None,
         metrics_estrategia=comparacion["estrategia"],
         metrics_buy_and_hold=comparacion["buy_and_hold"],
-        equity_curve_estrategia=[
-            EquityPoint(fecha=fecha.to_pydatetime(), valor=float(valor))
-            for fecha, valor in result_estrategia.equity_curve.items()
-        ],
-        equity_curve_buy_and_hold=[
-            EquityPoint(fecha=fecha.to_pydatetime(), valor=float(valor))
-            for fecha, valor in result_buy_and_hold.equity_curve.items()
-        ],
+        equity_curve_estrategia=_equity_points(result_estrategia.equity_curve),
+        equity_curve_buy_and_hold=_equity_points(result_buy_and_hold.equity_curve),
+        drawdown_curve_estrategia=_equity_points(drawdown_series(result_estrategia.returns)),
+        drawdown_curve_buy_and_hold=_equity_points(drawdown_series(result_buy_and_hold.returns)),
     )
+
+
+@router.get(
+    "/backtest-strategies",
+    response_model=BacktestStrategiesResponse,
+    summary="Catálogo de estrategias backtesteables (para el selector del frontend)",
+)
+def get_backtest_strategies() -> BacktestStrategiesResponse:
+    """Expone `_BACKTEST_STRATEGY_CATALOG` tal cual: la MISMA fuente que usa
+    `get_backtest` para despachar, para que el selector/las descripciones/los
+    límites de `target_vol` en el frontend nunca puedan desincronizarse de
+    lo que el backend realmente calcula.
+    """
+    estrategias = [
+        BacktestStrategyInfo(
+            id=strategy_id,
+            nombre=str(info["nombre"]),
+            descripcion=str(info["descripcion"]),
+            objetivo=str(info["objetivo"]),
+            tradeoff=str(info["tradeoff"]),
+            tiene_target_vol=bool(info["tiene_target_vol"]),
+            target_vol_default=TARGET_VOL if info["tiene_target_vol"] else None,
+            target_vol_min=_TARGET_VOL_MIN if info["tiene_target_vol"] else None,
+            target_vol_max=_TARGET_VOL_MAX if info["tiene_target_vol"] else None,
+        )
+        for strategy_id, info in _BACKTEST_STRATEGY_CATALOG.items()
+    ]
+    return BacktestStrategiesResponse(estrategias=estrategias, cost_bps_default=TRANSACTION_COST_BPS)
 
 
 # --------------------------------------------------------------------------
