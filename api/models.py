@@ -112,23 +112,33 @@ class SuggesterResponse(BaseModel):
 
 
 class RiskPercentiles(BaseModel):
-    """Percentil histórico (0-100) de cada métrica de riesgo (Fase 20a) —
-    ver `metrics.risk_measures.historical_percentile`: "¿qué fracción de la
-    propia historia de esta métrica tuvo un valor MENOR O IGUAL al de hoy?".
-    Descriptivo, no predictivo — un percentil alto no anticipa nada sobre
-    mañana, solo describe que hoy es inusual respecto del pasado.
+    """Percentil (0-100) de cada métrica de riesgo (Fase 20a, base
+    unificada en Fase 20c) — ver `metrics.risk_measures.historical_percentile`:
+    "¿qué fracción del ÚLTIMO AÑO de esta métrica tuvo un valor MENOR O
+    IGUAL al de hoy?". Descriptivo, no predictivo — un percentil alto no
+    anticipa nada sobre mañana, solo describe que hoy es inusual respecto
+    de lo reciente.
 
-    `var95`/`es95` se calculan contra una serie de VaR/ES recalculada en
-    ventana móvil de 1 año (no contra el valor único sobre TODA la
-    historia que muestra `RiskResponse.var95`/`es95`) — necesitan su propia
-    serie histórica para poder ubicar el valor de hoy en algún lado, ver
-    `metrics.risk_measures.rolling_value_at_risk`/`rolling_expected_shortfall`.
+    Fase 20c (coherencia): las CUATRO métricas de acá usan la MISMA
+    ventana de comparación — `base` la nombra explícitamente, para que
+    quede claro que es la MISMA base que usa `RiskResponse.regimen`
+    (`models.garch.volatility_regime`, también rolling de 1 año) — antes de
+    esta fase, estos percentiles comparaban contra TODA la historia
+    mientras el régimen comparaba contra el último año, lo que podía
+    mostrar, por ejemplo, "TENSIÓN" junto a un percentil bajo sin ninguna
+    explicación de por qué no contradecían: eran dos lentes distintos sin
+    rotular. `var95`/`es95` acá corresponden a `RiskResponse.var95_actual`/
+    `es95_actual` (el GARCH-VaR/ES de HOY, ver esos campos) — NO a
+    `RiskResponse.var95`/`es95` (todo el historial), que al ser un único
+    número sobre toda la serie no tiene un "percentil de hoy" que tenga
+    sentido calcular.
     """
 
     vol_realizada: float | None
     vol_garch: float | None
     var95: float | None
     es95: float | None
+    base: str = Field(description="Rótulo legible de la ventana de comparación compartida por las 4 métricas de acá")
 
 
 class ReturnHistogram(BaseModel):
@@ -150,6 +160,18 @@ class RiskResponse(BaseModel):
     """Respuesta de `GET /api/risk` — mismas magnitudes que calcula
     `app.workers.AnalysisWorker` para la pestaña "Riesgo" del cockpit,
     siempre en diario (el modelo GARCH del proyecto es diario).
+
+    COHERENCIA (Fase 20c, léase antes de tocar esto): `var95`/`es95` son
+    puntuales sobre TODA la serie histórica — NO se mueven con el régimen
+    actual (un activo en "tensión" y ese mismo activo en "calma" muestran
+    el MISMO número), así que no sirven para responder "¿cuánto riesgo hay
+    HOY?". Para eso están `var95_actual`/`es95_actual`: el VaR/ES
+    PARAMÉTRICO implícito por el modelo GARCH ya ajustado
+    (`models.garch.garch_var`/`garch_expected_shortfall`, usando la
+    volatilidad condicional de HOY) — es la magnitud que SÍ hay que mirar
+    para "riesgo actual", y la que muestra el frontend como titular.
+    `var95`/`es95` quedan como referencia secundaria de largo plazo,
+    rotulados explícitamente (`historico_basis`) para no confundirlos.
     """
 
     asset: str
@@ -157,8 +179,17 @@ class RiskResponse(BaseModel):
     modelo_garch: str = Field(description='Modelo GARCH ganador, formato "vol/dist" (p. ej. "EGarch/t")')
     vol_garch: float = Field(description="Volatilidad condicional GARCH anualizada, última vela")
     regimen: str | None = Field(description='"calma" / "normal" / "tension", o null si no hay suficiente historia')
-    var95: float = Field(description="Value at Risk histórico al 95% (pérdida positiva)")
-    es95: float = Field(description="Expected Shortfall histórico al 95% (pérdida positiva)")
+    regimen_basis: str = Field(description="Rótulo legible de la ventana que usa 'regimen' (y los percentiles de 'percentiles')")
+    var95: float = Field(description="VaR histórico al 95% sobre TODA la serie (pérdida positiva) — referencia de largo plazo, NO refleja el régimen actual")
+    es95: float = Field(description="Expected Shortfall histórico al 95% sobre TODA la serie (pérdida positiva) — misma referencia que var95")
+    var95_actual: float = Field(
+        description="VaR 95% implícito por GARCH con la volatilidad condicional de HOY (pérdida positiva) — SÍ refleja el régimen actual"
+    )
+    es95_actual: float = Field(
+        description="Expected Shortfall 95% implícito por GARCH con la volatilidad condicional de HOY (pérdida positiva)"
+    )
+    historico_basis: str = Field(description="Rótulo legible de la base de var95/es95")
+    actual_basis: str = Field(description="Rótulo legible de la base de var95_actual/es95_actual")
     accion: str = Field(description="LONG / FLAT / SHORT (signals.engine)")
     score: float
     tamano_sugerido: float = Field(description="Tamaño de posición por vol targeting, en [-1, 1]")
@@ -168,30 +199,39 @@ class RiskResponse(BaseModel):
 
 
 class RiskSummaryRow(BaseModel):
-    """Fila de `GET /api/risk-summary` (Fase 20b) para UNA moneda.
+    """Fila de `GET /api/risk-summary` (Fase 20b, coherencia en Fase 20c)
+    para UNA moneda.
 
     A propósito NO incluye `vol_garch`: este endpoint evalúa las 5 monedas
     de `config.UNIVERSE` en una sola respuesta, y ajustar un modelo GARCH
     por activo (como hace `GET /api/risk`) sería demasiado lento para una
     tabla comparativa pensada para cargar de un vistazo, sin un botón
     explícito de por medio (ver el docstring de `get_risk_summary`).
-    `regimen` se calcula IGUAL que en `GET /api/risk`
-    (`models.garch.volatility_regime`, reutilizada tal cual), pero sobre la
-    volatilidad REALIZADA en vez de la condicional GARCH — mismo tipo de
-    magnitud (decimal, anualizada), así que la clasificación calma/normal/
-    tensión sigue siendo válida, solo que más rápida de calcular y algo
-    menos sensible a cambios recientes que la versión GARCH de la vista
-    detallada de un solo activo.
+
+    COHERENCIA (Fase 20c, léase antes de comparar esto con `GET /api/risk`):
+    `regimen` usa la MISMA función que `GET /api/risk`
+    (`models.garch.volatility_regime`), pero sobre volatilidad REALIZADA en
+    vez de condicional GARCH (`regimen_basis` lo rotula explícitamente) —
+    por eso una misma moneda puede aparecer "tensión" acá y "calma" en el
+    panel detallado (o viceversa) sin que sea una inconsistencia: son dos
+    métodos de medición distintos, no dos respuestas contradictorias sobre
+    lo mismo. `var95` tampoco es el histórico de toda la serie (a
+    diferencia de `RiskResponse.var95`): es un VaR "actual" recalculado en
+    ventana móvil de 1 año (`metrics.risk_measures.rolling_value_at_risk`),
+    la alternativa rápida (sin GARCH) al `var95_actual` paramétrico de
+    `GET /api/risk` — `var95_basis` lo rotula.
     """
 
     asset: str
     vol_realizada: float = Field(description="Volatilidad realizada anualizada (rolling)")
-    vol_realizada_percentil: float | None = Field(description="Percentil histórico de vol_realizada, 0-100")
+    vol_realizada_percentil: float | None = Field(description="Percentil de vol_realizada vs su propia ventana reciente, 0-100")
     regimen: str | None = Field(
         description='"calma"/"normal"/"tension" según la volatilidad REALIZADA (no GARCH, ver arriba), o null'
     )
-    var95: float = Field(description="Value at Risk histórico al 95% (pérdida positiva)")
-    var95_percentil: float | None = Field(description="Percentil histórico de var95 (ventana móvil de 1 año), 0-100")
+    regimen_basis: str = Field(description="Rótulo legible de qué volatilidad y ventana usa 'regimen' acá")
+    var95: float = Field(description="VaR 'actual' en ventana móvil de 1 año (pérdida positiva) — no el histórico de toda la serie")
+    var95_percentil: float | None = Field(description="Percentil de var95 vs su propia ventana reciente, 0-100")
+    var95_basis: str = Field(description="Rótulo legible de la base de var95 acá")
     ultima_fecha: datetime
 
 

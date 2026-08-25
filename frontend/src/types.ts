@@ -89,6 +89,8 @@ export interface RiskPercentiles {
   vol_garch: number | null;
   var95: number | null;
   es95: number | null;
+  /** Fase 20c: base de comparación compartida por las 4 métricas de acá (p. ej. "último año (365 días)"). */
+  base: string;
 }
 
 export interface ReturnHistogram {
@@ -104,8 +106,16 @@ export interface RiskResponse {
   modelo_garch: string;
   vol_garch: number;
   regimen: "calma" | "normal" | "tension" | null;
+  /** Fase 20c: rótulo de la ventana que usa `regimen` (misma que `percentiles.base`). */
+  regimen_basis: string;
+  /** VaR/ES histórico sobre TODA la serie — referencia de largo plazo, no refleja el régimen actual. */
   var95: number;
   es95: number;
+  /** Fase 20c: VaR/ES implícito por GARCH con la vol condicional de HOY — el titular. */
+  var95_actual: number;
+  es95_actual: number;
+  historico_basis: string;
+  actual_basis: string;
   accion: "LONG" | "FLAT" | "SHORT";
   score: number;
   tamano_sugerido: number;
@@ -119,8 +129,12 @@ export interface RiskSummaryRow {
   vol_realizada: number;
   vol_realizada_percentil: number | null;
   regimen: "calma" | "normal" | "tension" | null;
+  /** Fase 20c: aclara que este régimen usa vol REALIZADA, no GARCH. */
+  regimen_basis: string;
+  /** Fase 20c: VaR "actual" en ventana móvil de 1 año (no el histórico de toda la serie). */
   var95: number;
   var95_percentil: number | null;
+  var95_basis: string;
   ultima_fecha: string;
 }
 

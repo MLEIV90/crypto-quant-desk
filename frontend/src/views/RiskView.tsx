@@ -28,6 +28,7 @@ import { RiskSummaryTable } from "../components/RiskSummaryTable";
 import { ReturnHistogramChart } from "../components/ReturnHistogramChart";
 import { StatusMessage } from "../components/StatusMessage";
 import {
+  RISK_ACTUAL_VS_HISTORICO_HELP,
   RISK_HISTOGRAM_HELP,
   RISK_INTRO_HELP,
   RISK_METRIC_HELP,
@@ -40,17 +41,20 @@ import { COLORS, DIRECTION_COLORS, REGIME_COLORS } from "../theme";
 
 const RISK_INTERVAL = "1d"; // el modelo GARCH del proyecto es diario, ver api/main.py::DEFAULT_RISK_INTERVAL
 
-// Fase 20a: umbrales de color del percentil histórico — deliberadamente
-// los mismos ~70/90 que usa REGIME_COLORS de forma implícita (percentiles
-// de volatilidad muy altos son justamente lo que dispara "tensión" en
+// Fase 20a/20c: umbrales de color del percentil — deliberadamente los
+// mismos ~70/90 que usa REGIME_COLORS de forma implícita (percentiles de
+// volatilidad muy altos son justamente lo que dispara "tensión" en
 // models.garch.volatility_regime), para que el color de la tarjeta no
-// contradiga el del régimen mostrado al lado.
-function percentileDescriptor(percentile: number | null): { text: string; color?: string } {
+// contradiga el del régimen mostrado al lado. `base` (Fase 20c) viene de
+// la API (`risk.percentiles.base`) — nunca hardcodeado acá, para que el
+// texto nunca pueda desincronizarse de contra qué ventana se comparó de
+// verdad (ver api/models.py::RiskPercentiles).
+function percentileDescriptor(percentile: number | null, base: string): { text: string; color?: string } {
   if (percentile === null) {
-    return { text: "Sin historia suficiente para calcular el percentil." };
+    return { text: `Sin historia suficiente (${base}) para calcular el percentil.` };
   }
   const rounded = Math.round(percentile);
-  const text = `percentil ${rounded} — más alto que el ${rounded}% de la historia`;
+  const text = `percentil ${rounded} vs. ${base} — más alto que el ${rounded}% de ese período`;
   if (percentile >= 90) return { text, color: COLORS.danger };
   if (percentile >= 70) return { text, color: COLORS.warning };
   return { text };
@@ -112,54 +116,81 @@ export function RiskView({ asset, onAssetChange }: RiskViewProps) {
       )}
 
       {!errorMessage && risk && (
-        <div className="metric-grid">
-          <MetricCard
-            label="Vol. realizada anualizada"
-            value={`${(risk.vol_realizada * 100).toFixed(2)}%`}
-            help={`${RISK_METRIC_HELP.volRealizada} ${RISK_PERCENTILE_HELP}`}
-            subtext={percentileDescriptor(risk.percentiles.vol_realizada).text}
-            subtextColor={percentileDescriptor(risk.percentiles.vol_realizada).color}
-          />
-          <MetricCard label="Modelo GARCH ganador" value={risk.modelo_garch} help={RISK_METRIC_HELP.modeloGarch} />
-          <MetricCard
-            label="Vol. condicional GARCH"
-            value={`${(risk.vol_garch * 100).toFixed(2)}%`}
-            help={`${RISK_METRIC_HELP.volGarch} ${RISK_PERCENTILE_HELP}`}
-            subtext={percentileDescriptor(risk.percentiles.vol_garch).text}
-            subtextColor={percentileDescriptor(risk.percentiles.vol_garch).color}
-          />
-          <MetricCard
-            label="Régimen de volatilidad"
-            value={risk.regimen ? risk.regimen.toUpperCase() : "—"}
-            valueColor={risk.regimen ? REGIME_COLORS[risk.regimen] : undefined}
-            help={RISK_METRIC_HELP.regimen}
-          />
-          <MetricCard
-            label="VaR 95% (pérdida diaria)"
-            value={`${(risk.var95 * 100).toFixed(2)}%`}
-            help={`${RISK_METRIC_HELP.var95} ${RISK_PERCENTILE_HELP}`}
-            subtext={percentileDescriptor(risk.percentiles.var95).text}
-            subtextColor={percentileDescriptor(risk.percentiles.var95).color}
-          />
-          <MetricCard
-            label="Expected Shortfall 95%"
-            value={`${(risk.es95 * 100).toFixed(2)}%`}
-            help={`${RISK_METRIC_HELP.es95} ${RISK_PERCENTILE_HELP}`}
-            subtext={percentileDescriptor(risk.percentiles.es95).text}
-            subtextColor={percentileDescriptor(risk.percentiles.es95).color}
-          />
-          <MetricCard
-            label="Señal del engine"
-            value={`${risk.accion} (score ${risk.score >= 0 ? "+" : ""}${risk.score.toFixed(2)})`}
-            valueColor={DIRECTION_COLORS[risk.accion]}
-            help={RISK_METRIC_HELP.senal}
-          />
-          <MetricCard
-            label="Tamaño sugerido (vol targeting)"
-            value={`${risk.tamano_sugerido >= 0 ? "+" : ""}${risk.tamano_sugerido.toFixed(2)}x`}
-            help={RISK_METRIC_HELP.sizing}
-          />
-        </div>
+        <>
+          <div className="metric-grid">
+            <MetricCard
+              label="Vol. realizada anualizada"
+              value={`${(risk.vol_realizada * 100).toFixed(2)}%`}
+              help={`${RISK_METRIC_HELP.volRealizada} ${RISK_PERCENTILE_HELP}`}
+              subtext={percentileDescriptor(risk.percentiles.vol_realizada, risk.percentiles.base).text}
+              subtextColor={percentileDescriptor(risk.percentiles.vol_realizada, risk.percentiles.base).color}
+            />
+            <MetricCard label="Modelo GARCH ganador" value={risk.modelo_garch} help={RISK_METRIC_HELP.modeloGarch} />
+            <MetricCard
+              label="Vol. condicional GARCH"
+              value={`${(risk.vol_garch * 100).toFixed(2)}%`}
+              help={`${RISK_METRIC_HELP.volGarch} ${RISK_PERCENTILE_HELP}`}
+              subtext={percentileDescriptor(risk.percentiles.vol_garch, risk.percentiles.base).text}
+              subtextColor={percentileDescriptor(risk.percentiles.vol_garch, risk.percentiles.base).color}
+            />
+            <MetricCard
+              label="Régimen de volatilidad"
+              value={risk.regimen ? risk.regimen.toUpperCase() : "—"}
+              valueColor={risk.regimen ? REGIME_COLORS[risk.regimen] : undefined}
+              help={`${RISK_METRIC_HELP.regimen} Base: ${risk.regimen_basis}.`}
+              subtext={`vs. ${risk.regimen_basis}`}
+            />
+            <MetricCard
+              label="Señal del engine"
+              value={`${risk.accion} (score ${risk.score >= 0 ? "+" : ""}${risk.score.toFixed(2)})`}
+              valueColor={DIRECTION_COLORS[risk.accion]}
+              help={RISK_METRIC_HELP.senal}
+            />
+            <MetricCard
+              label="Tamaño sugerido (vol targeting)"
+              value={`${risk.tamano_sugerido >= 0 ? "+" : ""}${risk.tamano_sugerido.toFixed(2)}x`}
+              help={RISK_METRIC_HELP.sizing}
+            />
+          </div>
+
+          <h3 className="panel-subtitle">
+            VaR / Expected Shortfall: actual vs. histórico
+            <InfoTooltip text={RISK_ACTUAL_VS_HISTORICO_HELP} />
+          </h3>
+          <p className="view-note">
+            El VaR/ES "actual" refleja el régimen de HOY (se mueve con la volatilidad condicional GARCH); el
+            "histórico" es un único número sobre toda la serie y NO cambia aunque el mercado esté en calma o en
+            tensión — mirá el actual para saber cuánto riesgo hay ahora.
+          </p>
+          <div className="metric-grid">
+            <MetricCard
+              label="VaR 95% actual (hoy)"
+              value={`${(risk.var95_actual * 100).toFixed(2)}%`}
+              help={`${RISK_METRIC_HELP.var95} ${RISK_PERCENTILE_HELP} Base: ${risk.actual_basis}.`}
+              subtext={percentileDescriptor(risk.percentiles.var95, risk.percentiles.base).text}
+              subtextColor={percentileDescriptor(risk.percentiles.var95, risk.percentiles.base).color}
+            />
+            <MetricCard
+              label="ES 95% actual (hoy)"
+              value={`${(risk.es95_actual * 100).toFixed(2)}%`}
+              help={`${RISK_METRIC_HELP.es95} ${RISK_PERCENTILE_HELP} Base: ${risk.actual_basis}.`}
+              subtext={percentileDescriptor(risk.percentiles.es95, risk.percentiles.base).text}
+              subtextColor={percentileDescriptor(risk.percentiles.es95, risk.percentiles.base).color}
+            />
+            <MetricCard
+              label="VaR 95% histórico"
+              value={`${(risk.var95 * 100).toFixed(2)}%`}
+              help={RISK_METRIC_HELP.var95}
+              subtext={`referencia: ${risk.historico_basis} (no refleja el régimen actual)`}
+            />
+            <MetricCard
+              label="ES 95% histórico"
+              value={`${(risk.es95 * 100).toFixed(2)}%`}
+              help={RISK_METRIC_HELP.es95}
+              subtext={`referencia: ${risk.historico_basis} (no refleja el régimen actual)`}
+            />
+          </div>
+        </>
       )}
 
       {!errorMessage && risk && (

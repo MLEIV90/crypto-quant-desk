@@ -107,11 +107,24 @@ export const RISK_VOL_TARGETING_HELP =
   "drawdown, no solo el retorno final.";
 
 export const RISK_SUMMARY_HELP =
-  "Comparación de riesgo actual entre las 5 monedas — cuál está más volátil o en tensión hoy. El régimen de " +
-  "esta tabla usa volatilidad REALIZADA (histórica), no el modelo GARCH que arma el resto de esta vista para " +
-  "el activo seleccionado: ajustar un GARCH para las 5 monedas a la vez sería demasiado lento para una tabla " +
-  "que se lee de un vistazo, así que acá se prioriza velocidad sobre precisión — puede diferir levemente del " +
-  "régimen GARCH de arriba. Hacé clic en una fila para pasar a ver el detalle completo de esa moneda.";
+  "Comparación de riesgo actual entre las 5 monedas — cuál está más volátil o en tensión hoy. El régimen y el " +
+  "VaR de esta tabla usan volatilidad REALIZADA y una ventana móvil (no el modelo GARCH que arma el resto de " +
+  "esta vista para el activo seleccionado): ajustar un GARCH para las 5 monedas a la vez sería demasiado " +
+  "lento para una tabla que se lee de un vistazo, así que acá se prioriza velocidad sobre precisión — el " +
+  "rótulo de cada columna aclara la base exacta, y puede diferir del régimen/VaR GARCH del panel de abajo sin " +
+  "que eso sea una contradicción: son dos métodos de medición distintos, no dos respuestas sobre lo mismo. " +
+  "Hacé clic en una fila para pasar a ver el detalle completo de esa moneda.";
+
+// Fase 20c: coherencia del panel de riesgo — VaR/ES "actual" (GARCH, hoy)
+// vs. "histórico" (toda la serie), y bases de comparación explícitas.
+
+export const RISK_ACTUAL_VS_HISTORICO_HELP =
+  "Antes, el VaR y el ES que se mostraban acá eran un único número calculado sobre TODA la historia del " +
+  "activo — el mismo valor tanto en un día de calma como en uno de tensión, así que no servían para " +
+  "responder '¿cuánto riesgo hay HOY?'. El VaR/ES ACTUAL resuelve eso: se calcula con la volatilidad " +
+  "condicional GARCH de la vela de hoy, así que sube y baja junto con el régimen. El histórico se conserva " +
+  "como referencia de largo plazo (útil para comparar activos entre sí en un período largo), pero rotulado " +
+  "aparte para no confundirlo con 'el riesgo de hoy'.";
 
 export const SUGGESTER_HELP =
   "Es un VOTO de varios estudios técnicos (RSI, medias, MACD, estocástico, Bollinger, pivote) combinados por " +

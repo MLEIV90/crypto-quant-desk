@@ -1358,6 +1358,10 @@
   font-size: 0.8rem;
 }
 
+.risk-summary-table__basis {
+  margin-top: 6px;
+}
+
 .pair-semaphore {
   display: inline-flex;
   align-items: center;

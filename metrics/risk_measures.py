@@ -295,13 +295,12 @@ def rolling_value_at_risk(r: pd.Series, window: int, level: float = 0.95) -> pd.
     (ver `historical_percentile`), en vez de un único número sobre TODA la
     historia. Los primeros `window - 1` valores quedan en NaN (warmup, sin
     suficientes observaciones todavía para esa ventana).
+
+    USO EN LA API (Fase 20c): esta es la vía "VaR actual" para
+    `GET /api/risk-summary`, que a propósito NO ajusta un modelo GARCH por
+    activo (ver ese endpoint) — para `GET /api/risk`, que SÍ tiene un GARCH
+    ya ajustado, el VaR "actual" que refleja el régimen de hoy es
+    `models.garch.garch_var` (paramétrico, genuinamente del momento), no
+    esta versión por ventana móvil.
     """
     return r.rolling(window).apply(lambda window_values: value_at_risk(pd.Series(window_values), level=level), raw=True)
-
-
-def rolling_expected_shortfall(r: pd.Series, window: int, level: float = 0.95) -> pd.Series:
-    """Igual que `rolling_value_at_risk`, pero con `expected_shortfall`
-    (reutilizada tal cual)."""
-    return r.rolling(window).apply(
-        lambda window_values: expected_shortfall(pd.Series(window_values), level=level), raw=True
-    )

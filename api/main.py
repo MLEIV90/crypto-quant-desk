@@ -99,14 +99,13 @@ from eda.eda_report import adf_test, correlation_matrix
 from metrics.risk_measures import (
     expected_shortfall,
     historical_percentile,
-    rolling_expected_shortfall,
     rolling_value_at_risk,
     value_at_risk,
 )
 from ml.features import align_features_labels, build_feature_matrix
 from ml.labeling import get_daily_volatility, triple_barrier_labels
 from ml.models import evaluate_primary_with_roc_auc, feature_importances, fit_final, latest_oos_prediction, t1_from_labels
-from models.garch import conditional_volatility, select_best_model, volatility_regime
+from models.garch import conditional_volatility, garch_expected_shortfall, garch_var, select_best_model, volatility_regime
 from pairs.backtest import DEFAULT_PAIR_ENTRY, DEFAULT_PAIR_EXIT, DEFAULT_PAIR_STOP, backtest_pair
 from pairs.cointegration import engle_granger, half_life
 from pairs.signals import zscore
@@ -133,6 +132,19 @@ logger = logging.getLogger(__name__)
 # en un intervalo derivado, se refresca su base.
 SUPPORTED_INTERVALS: tuple[str, ...] = ("1d", "1h", "4h", "1w")
 DEFAULT_RISK_INTERVAL = "1d"  # el modelo GARCH del proyecto es diario, ver models/garch.py
+
+# Rótulos de base para /api/risk y /api/risk-summary (Fase 20c, coherencia
+# del panel de riesgo) — texto legible que documenta, EN LA RESPUESTA
+# misma, contra qué ventana/método se compara cada número, para que el
+# frontend nunca tenga que adivinar ni hardcodear una explicación que
+# podría desincronizarse del cálculo real. Ver el docstring de
+# `RiskResponse`/`RiskSummaryRow` en `api/models.py` para el porqué.
+RISK_ROLLING_WINDOW_LABEL = "último año (365 días)"
+RISK_HISTORICO_BASIS_LABEL = "toda la serie histórica"
+RISK_ACTUAL_GARCH_BASIS_LABEL = "volatilidad condicional GARCH de hoy"
+RISK_REGIMEN_GARCH_BASIS_LABEL = f"{RISK_ROLLING_WINDOW_LABEL}, volatilidad condicional GARCH"
+RISK_SUMMARY_REGIMEN_BASIS_LABEL = f"{RISK_ROLLING_WINDOW_LABEL}, volatilidad realizada (no GARCH)"
+RISK_SUMMARY_VAR_BASIS_LABEL = f"{RISK_ROLLING_WINDOW_LABEL}, ventana móvil (no GARCH)"
 
 # Tope de `limit` en /api/ohlcv y /api/studies (Fase 11): por encima del
 # histórico horario real más largo (~58.000 velas desde 2020, ver
@@ -541,12 +553,20 @@ def get_suggester(asset: str, interval: str = "1d") -> SuggesterResponse:
 @router.get("/risk", response_model=RiskResponse, summary="Panel de riesgo (GARCH/VaR/ES/sizing)")
 def get_risk(asset: str) -> RiskResponse:
     """Reutiliza `models.garch.select_best_model`/`conditional_volatility`/
-    `volatility_regime`, `metrics.risk_measures.value_at_risk`/
-    `expected_shortfall` y `signals.engine.latest_recommendation` — la misma
-    secuencia de llamadas que arma `app.workers.AnalysisWorker` para la
-    pestaña "Riesgo" del cockpit, reescrita acá para no depender de la app
-    de escritorio (PySide6) desde la API. LENTO: ajusta un modelo GARCH por
-    request (ver docstring del módulo).
+    `volatility_regime`/`garch_var`/`garch_expected_shortfall`,
+    `metrics.risk_measures.value_at_risk`/`expected_shortfall`/
+    `historical_percentile` y `signals.engine.latest_recommendation` — la
+    misma secuencia de llamadas que arma `app.workers.AnalysisWorker` para
+    la pestaña "Riesgo" del cockpit, reescrita acá para no depender de la
+    app de escritorio (PySide6) desde la API. LENTO: ajusta un modelo GARCH
+    por request (ver docstring del módulo).
+
+    COHERENCIA (Fase 20c): ver el docstring de `RiskResponse` en
+    `api/models.py` para por qué esta respuesta trae DOS VaR/ES distintos
+    (`var95`/`es95` histórico vs. `var95_actual`/`es95_actual` de HOY) y
+    por qué los 4 percentiles de `percentiles` comparten la MISMA ventana
+    que `regimen` (último año) en vez de comparar contra toda la historia
+    como en la versión anterior de este endpoint.
     """
     df = _load_df(asset, DEFAULT_RISK_INTERVAL)
     close = df["close"]
@@ -555,38 +575,51 @@ def get_risk(asset: str) -> RiskResponse:
     garch_returns = log_returns(close).dropna()
 
     best = select_best_model(garch_returns, criterion="aic")
-    cond_vol = conditional_volatility(best["result"])
+    garch_result = best["result"]
+    cond_vol = conditional_volatility(garch_result)
     regime_series = volatility_regime(cond_vol)
     last_regime = regime_series.iloc[-1]
 
+    # Histórico (toda la serie) — referencia de largo plazo, NO refleja el
+    # régimen actual (ver docstring de RiskResponse).
     var95 = value_at_risk(returns, level=0.95)
     es95 = expected_shortfall(returns, level=0.95)
 
+    # "Actual" (Fase 20c): paramétrico GARCH, usando la volatilidad
+    # condicional de HOY — esto es lo que SÍ se mueve con el régimen, y lo
+    # que el frontend muestra como titular.
+    garch_var_series = garch_var(garch_result, alpha=0.05)
+    garch_es_series = garch_expected_shortfall(garch_result, alpha=0.05)
+    var95_actual = float(garch_var_series.iloc[-1])
+    es95_actual = float(garch_es_series.iloc[-1])
+
     recomendacion = latest_recommendation(df, garch_regime=False)
 
-    # Fase 20a: percentil histórico de cada métrica — "¿hoy es más
-    # riesgoso que lo habitual?". Vol realizada/GARCH ya son series
-    # temporales (se compara el último valor contra su propia historia).
-    # VaR/ES son puntuales sobre TODA la historia (arriba), así que para
-    # tener una serie contra la cual ubicar el valor de hoy se recalculan
-    # en una ventana móvil de 1 año (PERIODS_PER_YEAR, mismo horizonte que
-    # models.garch.volatility_regime) — ver metrics.risk_measures.
+    # Fase 20a/20c: percentil de cada métrica "actual" vs su propia ventana
+    # RECIENTE (último año, MISMA base que `regimen` — antes de Fase 20c
+    # comparaban contra TODA la historia, una base distinta de la de
+    # `regimen` que podía verse contradictoria, p. ej. "TENSIÓN" junto a un
+    # percentil bajo). Vol realizada/GARCH/VaR/ES-actual ya son series
+    # temporales — alcanza con recortar a los últimos PERIODS_PER_YEAR
+    # valores antes de ubicar el último dato en esa ventana.
     realized_vol_series = (
         returns.rolling(window=VOL_WINDOW).std(ddof=1) * np.sqrt(PERIODS_PER_YEAR)
     )  # misma fórmula que signals.engine.generate_positions/latest_recommendation
-    rolling_var = rolling_value_at_risk(returns, window=PERIODS_PER_YEAR, level=0.95)
-    rolling_es = rolling_expected_shortfall(returns, window=PERIODS_PER_YEAR, level=0.95)
 
     percentiles = RiskPercentiles(
-        vol_realizada=_none_if_nan(historical_percentile(realized_vol_series)),
-        vol_garch=_none_if_nan(historical_percentile(cond_vol)),
-        var95=_none_if_nan(historical_percentile(rolling_var)),
-        es95=_none_if_nan(historical_percentile(rolling_es)),
+        vol_realizada=_none_if_nan(historical_percentile(realized_vol_series.tail(PERIODS_PER_YEAR))),
+        vol_garch=_none_if_nan(historical_percentile(cond_vol.tail(PERIODS_PER_YEAR))),
+        var95=_none_if_nan(historical_percentile(garch_var_series.tail(PERIODS_PER_YEAR))),
+        es95=_none_if_nan(historical_percentile(garch_es_series.tail(PERIODS_PER_YEAR))),
+        base=RISK_ROLLING_WINDOW_LABEL,
     )
 
     # Fase 20a: distribución de retornos diarios + marcas de VaR/ES sobre
     # esa distribución, para el histograma del frontend (bins vía
-    # numpy.histogram, no un cálculo propio del proyecto).
+    # numpy.histogram, no un cálculo propio del proyecto). Las marcas usan
+    # el VaR/ES HISTÓRICO (no el actual): son el percentil/cola real de
+    # ESTA MISMA distribución empírica que se está graficando, no una
+    # proyección paramétrica de otro momento.
     counts, edges = np.histogram(returns.to_numpy(), bins=40)
     histograma = ReturnHistogram(
         bin_edges=[float(edge) for edge in edges],
@@ -601,8 +634,13 @@ def get_risk(asset: str) -> RiskResponse:
         modelo_garch=f"{best['vol']}/{best['dist']}",
         vol_garch=float(cond_vol.iloc[-1]),
         regimen=str(last_regime) if pd.notna(last_regime) else None,
+        regimen_basis=RISK_REGIMEN_GARCH_BASIS_LABEL,
         var95=float(var95),
         es95=float(es95),
+        var95_actual=var95_actual,
+        es95_actual=es95_actual,
+        historico_basis=RISK_HISTORICO_BASIS_LABEL,
+        actual_basis=RISK_ACTUAL_GARCH_BASIS_LABEL,
         accion=str(recomendacion["accion"]),
         score=float(recomendacion["score"]),
         tamano_sugerido=float(recomendacion["tamaño_sugerido"]),
@@ -625,9 +663,9 @@ def get_risk(asset: str) -> RiskResponse:
 def get_risk_summary() -> RiskSummaryResponse:
     """Reutiliza `signals.returns.simple_returns`, `metrics.risk_measures.value_at_risk`/
     `historical_percentile`/`rolling_value_at_risk` y `models.garch.volatility_regime`
-    (Fase 20b) — la misma fórmula de vol realizada que `GET /api/risk`
-    (`returns.rolling(VOL_WINDOW).std(ddof=1) * sqrt(PERIODS_PER_YEAR)`) y
-    la MISMA función de régimen, pero aplicada a esa serie de vol
+    (Fase 20b, coherencia en Fase 20c) — la misma fórmula de vol realizada
+    que `GET /api/risk` (`returns.rolling(VOL_WINDOW).std(ddof=1) * sqrt(PERIODS_PER_YEAR)`)
+    y la MISMA función de régimen, pero aplicada a esa serie de vol
     REALIZADA en vez de a la volatilidad condicional GARCH.
 
     DECISIÓN DE RENDIMIENTO (léase antes de tocar esto): `GET /api/risk`
@@ -639,10 +677,20 @@ def get_risk_summary() -> RiskSummaryResponse:
     ajustar 5 modelos GARCH secuenciales haría esa carga demasiado lenta
     para una tabla comparativa que se supone se lee "de un vistazo". En vez
     de eso, se usa volatilidad REALIZADA (rápida: un rolling std) tanto
-    para el valor mostrado como para clasificar el régimen — `RiskSummaryRow`
-    documenta esta diferencia con `GET /api/risk` explícitamente, para que
-    no se confunda con el régimen GARCH de la vista detallada de un activo.
-    No devuelve `vol_garch` por el mismo motivo.
+    para el valor mostrado como para clasificar el régimen, y un VaR
+    recalculado en ventana móvil (`rolling_value_at_risk`, rápido: sin
+    GARCH) en vez del paramétrico GARCH de `GET /api/risk` — `RiskSummaryRow`
+    documenta esta diferencia con `GET /api/risk` explícitamente
+    (`regimen_basis`/`var95_basis`), para que no se confunda con el
+    régimen/VaR GARCH de la vista detallada de un activo. No devuelve
+    `vol_garch` por el mismo motivo.
+
+    COHERENCIA (Fase 20c): `var95` acá YA NO es el histórico de toda la
+    serie (como quedó `GET /api/risk`'s `var95`) — es la misma idea de
+    "actual" que `var95_actual` de esa vista, solo que calculado con una
+    ventana móvil en vez de GARCH. El percentil de cada fila compara contra
+    su propia ventana de RISK_ROLLING_WINDOW_LABEL, la misma base que usa
+    `regimen` — ver el docstring de `RiskSummaryRow`.
     """
     filas: list[RiskSummaryRow] = []
     for asset in UNIVERSE:
@@ -654,17 +702,19 @@ def get_risk_summary() -> RiskSummaryResponse:
         regime_series = volatility_regime(realized_vol_series)
         last_regime = regime_series.iloc[-1]
 
-        var95 = value_at_risk(returns, level=0.95)
         rolling_var = rolling_value_at_risk(returns, window=PERIODS_PER_YEAR, level=0.95)
+        var95_actual = float(rolling_var.iloc[-1])
 
         filas.append(
             RiskSummaryRow(
                 asset=asset,
                 vol_realizada=float(realized_vol_series.iloc[-1]),
-                vol_realizada_percentil=_none_if_nan(historical_percentile(realized_vol_series)),
+                vol_realizada_percentil=_none_if_nan(historical_percentile(realized_vol_series.tail(PERIODS_PER_YEAR))),
                 regimen=str(last_regime) if pd.notna(last_regime) else None,
-                var95=float(var95),
-                var95_percentil=_none_if_nan(historical_percentile(rolling_var)),
+                regimen_basis=RISK_SUMMARY_REGIMEN_BASIS_LABEL,
+                var95=var95_actual,
+                var95_percentil=_none_if_nan(historical_percentile(rolling_var.tail(PERIODS_PER_YEAR))),
+                var95_basis=RISK_SUMMARY_VAR_BASIS_LABEL,
                 ultima_fecha=close.index[-1].to_pydatetime(),
             )
         )

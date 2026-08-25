@@ -23,47 +23,59 @@ function percentileLabel(value: number | null): string {
 }
 
 export function RiskSummaryTable({ filas, activeAsset, onSelectAsset }: RiskSummaryTableProps) {
+  // Fase 20c: el rótulo de base es el mismo para las 5 filas (es una
+  // propiedad del MÉTODO de cálculo de esta tabla, no de cada moneda) —
+  // se muestra una sola vez como pie de tabla en vez de repetirlo por fila.
+  const first = filas[0];
+
   return (
-    <table className="metrics-table risk-summary-table">
-      <thead>
-        <tr>
-          <th>Moneda</th>
-          <th>Vol. realizada</th>
-          <th>Régimen</th>
-          <th>VaR 95%</th>
-        </tr>
-      </thead>
-      <tbody>
-        {filas.map((fila) => {
-          const isActive = fila.asset === activeAsset;
-          return (
-            <tr
-              key={fila.asset}
-              className={`risk-summary-table__row${isActive ? " risk-summary-table__row--active" : ""}`}
-              onClick={() => onSelectAsset(fila.asset)}
-              title={`Ver el detalle de riesgo de ${fila.asset}`}
-            >
-              <td className="risk-summary-table__asset">{fila.asset}</td>
-              <td>
-                {(fila.vol_realizada * 100).toFixed(1)}%
-                <span className="risk-summary-table__percentil">{percentileLabel(fila.vol_realizada_percentil)}</span>
-              </td>
-              <td>
-                <span
-                  className="risk-summary-table__regime"
-                  style={fila.regimen ? { color: REGIME_COLORS[fila.regimen] } : undefined}
-                >
-                  {fila.regimen ? fila.regimen.toUpperCase() : "—"}
-                </span>
-              </td>
-              <td>
-                {(fila.var95 * 100).toFixed(2)}%
-                <span className="risk-summary-table__percentil">{percentileLabel(fila.var95_percentil)}</span>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <>
+      <table className="metrics-table risk-summary-table">
+        <thead>
+          <tr>
+            <th>Moneda</th>
+            <th>Vol. realizada</th>
+            <th>Régimen</th>
+            <th>VaR 95%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((fila) => {
+            const isActive = fila.asset === activeAsset;
+            return (
+              <tr
+                key={fila.asset}
+                className={`risk-summary-table__row${isActive ? " risk-summary-table__row--active" : ""}`}
+                onClick={() => onSelectAsset(fila.asset)}
+                title={`Ver el detalle de riesgo de ${fila.asset}`}
+              >
+                <td className="risk-summary-table__asset">{fila.asset}</td>
+                <td>
+                  {(fila.vol_realizada * 100).toFixed(1)}%
+                  <span className="risk-summary-table__percentil">{percentileLabel(fila.vol_realizada_percentil)}</span>
+                </td>
+                <td>
+                  <span
+                    className="risk-summary-table__regime"
+                    style={fila.regimen ? { color: REGIME_COLORS[fila.regimen] } : undefined}
+                  >
+                    {fila.regimen ? fila.regimen.toUpperCase() : "—"}
+                  </span>
+                </td>
+                <td>
+                  {(fila.var95 * 100).toFixed(2)}%
+                  <span className="risk-summary-table__percentil">{percentileLabel(fila.var95_percentil)}</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {first && (
+        <p className="view-note risk-summary-table__basis">
+          Régimen: {first.regimen_basis} · VaR: {first.var95_basis}
+        </p>
+      )}
+    </>
   );
 }

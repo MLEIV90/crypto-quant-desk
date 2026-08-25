@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -269,19 +270,65 @@ def test_get_risk_returns_expected_fields() -> None:
     assert body["es95"] >= body["var95"]  # Expected Shortfall siempre >= VaR (misma convención de pérdida positiva)
     assert "/" in body["modelo_garch"]
 
-    # Fase 20a: percentiles históricos, todos en [0, 100] o None.
+    # Fase 20c: VaR/ES "actual" (GARCH, hoy) además del histórico (toda la
+    # serie) — misma relación ES >= VaR, y con rótulos de base no vacíos.
+    assert body["es95_actual"] >= body["var95_actual"]
+    assert body["historico_basis"]
+    assert body["actual_basis"]
+    assert body["historico_basis"] != body["actual_basis"]
+    assert body["regimen_basis"]
+
+    # Fase 20a/20c: percentiles, todos en [0, 100] o None, con un rótulo de
+    # base compartido no vacío (misma base que usa 'regimen').
     percentiles = body["percentiles"]
     for key in ("vol_realizada", "vol_garch", "var95", "es95"):
         value = percentiles[key]
         assert value is None or 0.0 <= value <= 100.0
+    assert percentiles["base"]
+    assert percentiles["base"] == body["regimen_basis"].split(",")[0].strip()
 
-    # Fase 20a: histograma de retornos + marcas de VaR/ES.
+    # Fase 20a: histograma de retornos + marcas de VaR/ES (histórico, no actual).
     histograma = body["histograma"]
     assert len(histograma["bin_edges"]) == len(histograma["counts"]) + 1
     assert sum(histograma["counts"]) > 0
     assert histograma["es95_return"] <= histograma["var95_return"]  # la cola del ES es más extrema (más negativa)
     assert histograma["var95_return"] == pytest.approx(-body["var95"])
     assert histograma["es95_return"] == pytest.approx(-body["es95"])
+
+
+def test_get_risk_actual_var_differs_from_historico_when_regime_shifts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fase 20c: caso conocido -- una serie con un tramo de vol BAJA seguido
+    # de un tramo de vol ALTA (justo antes de "hoy"). El VaR histórico
+    # (toda la serie) queda "promediado" entre ambos tramos, pero el VaR
+    # "actual" (GARCH, condicionado a la vela de hoy) debe reflejar el
+    # tramo de vol ALTA reciente -- por construcción, tienen que diferir.
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    rng = np.random.default_rng(7)
+    n_calm, n_stressed = 700, 60
+    calm = rng.normal(0.0, 0.005, n_calm)
+    stressed = rng.normal(0.0, 0.05, n_stressed)
+    log_rets = np.concatenate([calm, stressed])
+    prices = 100.0 * np.exp(np.cumsum(log_rets))
+
+    idx = pd.date_range(end=pd.Timestamp.now(tz="UTC").floor("D"), periods=len(prices) + 1, freq="D")
+    close = np.concatenate([[100.0], prices])
+    df = pd.DataFrame(
+        {"open": close, "high": close, "low": close, "close": close, "volume": 1000.0}, index=idx
+    )
+    df.index.name = "timestamp"
+    df.to_parquet(tmp_path / "BTC_1d.parquet")
+
+    response = client.get("/api/risk", params={"asset": "BTC"})
+
+    assert response.status_code == 200
+    body = response.json()
+    # El tramo reciente es mucho más volátil que el promedio de toda la
+    # serie -> el VaR actual (GARCH) debe ser sensiblemente mayor que el
+    # histórico, no casi igual (que sería la señal de que no está
+    # reaccionando al régimen reciente en absoluto).
+    assert body["var95_actual"] > body["var95"] * 1.2
 
 
 def test_get_risk_unknown_asset_returns_404() -> None:
@@ -314,6 +361,13 @@ def test_get_risk_summary_returns_one_row_per_asset() -> None:
             assert value is None or 0.0 <= value <= 100.0
         # Fase 20b: a propósito NO expone vol_garch (ver docstring del endpoint).
         assert "vol_garch" not in fila
+        # Fase 20c: rótulos de base no vacíos, que ACLARAN explícitamente
+        # que esto NO es GARCH (para no sugerir que son comparables con el
+        # régimen/VaR GARCH de /api/risk).
+        assert fila["regimen_basis"]
+        assert fila["var95_basis"]
+        assert "no GARCH" in fila["regimen_basis"]
+        assert "no GARCH" in fila["var95_basis"]
 
 
 def test_get_risk_summary_is_fast_without_garch(monkeypatch: pytest.MonkeyPatch) -> None:

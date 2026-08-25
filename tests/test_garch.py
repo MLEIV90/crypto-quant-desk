@@ -11,6 +11,7 @@ from models.garch import (
     conditional_volatility,
     fit_garch_variant,
     forecast_volatility,
+    garch_expected_shortfall,
     garch_var,
     kupiec_test,
     select_best_model,
@@ -157,6 +158,46 @@ def test_garch_var_higher_confidence_is_more_conservative(fitted_garch) -> None:
     var_99 = garch_var(fitted_garch, alpha=0.01)
 
     assert (var_99 >= var_95).all()
+
+
+# --------------------------------------------------------------------------
+# garch_expected_shortfall (Fase 20c)
+# --------------------------------------------------------------------------
+
+
+def test_garch_expected_shortfall_is_positive_and_aligned(simulated_returns: pd.Series, fitted_garch) -> None:
+    es_series = garch_expected_shortfall(fitted_garch, alpha=0.05)
+
+    assert len(es_series) == len(simulated_returns)
+    assert (es_series > 0).all()
+
+
+def test_garch_expected_shortfall_always_ge_garch_var(fitted_garch) -> None:
+    # Misma relación que metrics.risk_measures.value_at_risk/expected_shortfall:
+    # el ES mira más adentro de la cola que el VaR, así que nunca puede ser menor.
+    var_series = garch_var(fitted_garch, alpha=0.05)
+    es_series = garch_expected_shortfall(fitted_garch, alpha=0.05)
+
+    assert (es_series >= var_series - 1e-9).all()
+
+
+def test_garch_expected_shortfall_higher_confidence_is_more_conservative(fitted_garch) -> None:
+    es_95 = garch_expected_shortfall(fitted_garch, alpha=0.05)
+    es_99 = garch_expected_shortfall(fitted_garch, alpha=0.01)
+
+    assert (es_99 >= es_95).all()
+
+
+def test_garch_expected_shortfall_tracks_conditional_volatility(fitted_garch) -> None:
+    # Días de mayor volatilidad condicional deben tener mayor ES (misma
+    # relación monotónica que garch_var con sigma_t) -- confirma que el ES
+    # "se mueve" con el régimen, el problema concreto que motiva esta fase.
+    cond_vol = conditional_volatility(fitted_garch)
+    es_series = garch_expected_shortfall(fitted_garch, alpha=0.05)
+
+    calmest_day = cond_vol.idxmin()
+    most_stressed_day = cond_vol.idxmax()
+    assert es_series[most_stressed_day] > es_series[calmest_day]
 
 
 # --------------------------------------------------------------------------

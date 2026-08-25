@@ -15,7 +15,6 @@ from metrics.risk_measures import (
     expected_shortfall,
     historical_percentile,
     max_drawdown,
-    rolling_expected_shortfall,
     rolling_value_at_risk,
     sharpe_lo_adjusted,
     sharpe_ratio,
@@ -214,16 +213,3 @@ def test_rolling_value_at_risk_matches_manual_window_computation() -> None:
 
     last_window = r.iloc[-window:]
     assert rolling.iloc[-1] == pytest.approx(value_at_risk(last_window, level=0.95))
-
-
-def test_rolling_expected_shortfall_is_always_ge_rolling_var() -> None:
-    rng = np.random.default_rng(13)
-    r = pd.Series(rng.normal(0.0, 0.02, 200))
-    window = 50
-
-    rolling_var = rolling_value_at_risk(r, window=window, level=0.95)
-    rolling_es = rolling_expected_shortfall(r, window=window, level=0.95)
-
-    valid = rolling_var.notna() & rolling_es.notna()
-    assert valid.sum() > 0
-    assert (rolling_es[valid] >= rolling_var[valid]).all()

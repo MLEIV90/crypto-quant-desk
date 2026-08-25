@@ -304,6 +304,51 @@ def garch_var(res: ARCHModelResult, alpha: float = 0.05) -> pd.Series:
     return var_pct / RETURN_SCALE
 
 
+# Cantidad de puntos de la grilla de probabilidades usada para aproximar la
+# esperanza de la cola en `garch_expected_shortfall` — ver esa función.
+_ES_TAIL_QUANTILE_POINTS: int = 2000
+
+
+def garch_expected_shortfall(res: ARCHModelResult, alpha: float = 0.05) -> pd.Series:
+    """Expected Shortfall condicional paramétrico diario (Fase 20c) — mismo
+    modelo que `garch_var` (volatilidad GARCH + distribución ajustada,
+    normal o t de Student), pero para la pérdida PROMEDIO dentro de la cola
+    en vez del percentil que la delimita.
+
+    No existe una fórmula cerrada única para ambas distribuciones que este
+    módulo soporta, así que se aproxima numéricamente la esperanza
+    condicional de la cola integrando el cuantil ESTANDARIZADO
+    (`dist.ppf`, la MISMA función que ya usa `garch_var` — no se deriva una
+    fórmula analítica nueva por distribución) sobre una grilla fina de
+    `_ES_TAIL_QUANTILE_POINTS` probabilidades en `(0, alpha]`:
+
+        E[Z | Z <= q_alpha] ~= promedio de ppf(p) para p en esa grilla
+
+    ES_t = -(mu_t + sigma_t * E[Z | Z <= q_alpha])
+
+    Reporta en escala DECIMAL, como PÉRDIDA POSITIVA (misma convención que
+    `garch_var`/`metrics.risk_measures.expected_shortfall`) — por
+    construcción, siempre `>= garch_var(res, alpha)` en cada fecha, igual
+    que la relación VaR/ES histórica.
+    """
+    dist = res.model.distribution
+    n_dist_params = dist.num_params
+    dist_params = res.params.iloc[-n_dist_params:] if n_dist_params > 0 else []
+
+    # Arranca en un epsilon > 0 (no en 0 exacto): la densidad de una t de
+    # pocos grados de libertad diverge en el límite p->0, así que ppf(0)
+    # sería -inf y arruinaría el promedio.
+    tail_probs = np.linspace(1e-6, alpha, _ES_TAIL_QUANTILE_POINTS)
+    tail_quantiles = np.asarray(dist.ppf(tail_probs, dist_params))
+    z_tail_mean = float(tail_quantiles.mean())
+
+    mu_pct = float(res.params.get("mu", 0.0))
+    sigma_pct = res.conditional_volatility
+
+    es_pct = -(mu_pct + sigma_pct * z_tail_mean)
+    return es_pct / RETURN_SCALE
+
+
 def kupiec_test(returns: pd.Series, var_series: pd.Series, alpha: float = 0.05) -> dict:
     """Test de cobertura incondicional de Kupiec (POF, Proportion of
     Failures) para validar una serie de VaR (p. ej. la de `garch_var`).
