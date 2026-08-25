@@ -179,24 +179,31 @@ _BACKTEST_STRATEGY_CATALOG: dict[str, dict[str, str | bool]] = {
         ),
         "objetivo": "Mantener una exposición al riesgo pareja en el tiempo, no maximizar el retorno.",
         "tradeoff": (
-            "En mercados alcistas fuertes y sostenidos tiende a rendir menos que buy & hold (reduce "
-            "posición justo cuando el mercado sube con volatilidad), a cambio de sufrir caídas más "
-            "chicas cuando el mercado se agita — el balance exacto entre ambas cosas depende del "
-            "activo y del período, no es una garantía: mirá los números de abajo para este caso en particular."
+            "Fase 23: en TEORÍA, reducir posición cuando sube la volatilidad tiende a costar algo de "
+            "retorno en mercados alcistas fuertes y sostenidos (es el trade-off esperado del mecanismo, "
+            "reduce posición justo cuando el mercado sube con volatilidad). En la PRÁCTICA, para este "
+            "activo y este período, el efecto fue el contrario — la tabla de abajo es la verdad de este "
+            "caso concreto, no esta descripción general del mecanismo: mirala antes de sacar conclusiones."
         ),
         "tiene_target_vol": True,
     },
     "engine": {
         "nombre": "Señal del engine de consenso",
         "descripcion": (
-            "Combina tendencia (EMA/MACD), momentum (RSI) y reversión a la media (Bollinger) en "
-            "un score compuesto que decide estar LARGO, corto o afuera. El tamaño de la posición "
-            "sigue la convicción del score, sin ajustar por volatilidad."
+            "Combina tendencia (EMA/MACD), momentum (RSI) y reversión a la media (Bollinger) en un "
+            "score compuesto que INTENTA anticipar la dirección del precio (largo, corto o afuera). "
+            "El tamaño de la posición sigue la convicción del score, sin ajustar por volatilidad."
         ),
-        "objetivo": "Anticipar la dirección del precio con un score técnico compuesto.",
+        "objetivo": (
+            "Intentar anticipar la dirección del precio combinando varios indicadores técnicos — el "
+            "mismo enfoque de base que el sugeridor de la pestaña Análisis Técnico, no un modelo nuevo."
+        ),
         "tradeoff": (
-            "Puede quedar mal posicionado en cambios de régimen bruscos, porque no reduce el "
-            "tamaño cuando el mercado se pone más volátil."
+            "Fase 23: el proyecto ya mostró que anticipar la dirección de forma consistente es difícil "
+            "— el sugeridor de Análisis Técnico está etiquetado 'sin edge' porque no le gana con "
+            "claridad a buy & hold. Esta estrategia parte de la misma lógica de base: no asumas que sí "
+            "tiene ventaja solo por combinar más indicadores, y además no reduce el tamaño cuando el "
+            "mercado se pone más volátil. Mirá los números de abajo para este caso concreto."
         ),
         "tiene_target_vol": False,
     },
@@ -890,6 +897,7 @@ def get_backtest(
         equity_curve_buy_and_hold=_equity_points(result_buy_and_hold.equity_curve),
         drawdown_curve_estrategia=_equity_points(drawdown_series(result_estrategia.returns)),
         drawdown_curve_buy_and_hold=_equity_points(drawdown_series(result_buy_and_hold.returns)),
+        exposure_curve_estrategia=_equity_points(result_estrategia.positions),
     )
 
 

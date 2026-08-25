@@ -418,6 +418,27 @@ def test_get_backtest_drawdown_curves_are_never_positive_and_start_at_first_date
     assert all(point["valor"] <= 1e-9 for point in body["drawdown_curve_buy_and_hold"])
 
 
+def test_get_backtest_exposure_curve_is_long_only_for_vol_targeting() -> None:
+    response = client.get("/api/backtest", params={"asset": "BTC", "strategy": "vol_targeting"})
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert len(body["exposure_curve_estrategia"]) == len(body["equity_curve_estrategia"])
+    assert all(-1e-9 <= point["valor"] <= 1.0 + 1e-9 for point in body["exposure_curve_estrategia"])
+    assert "pct_tiempo_fuera" in body["metrics_estrategia"]
+
+
+def test_get_backtest_exposure_curve_can_be_negative_for_engine() -> None:
+    response = client.get("/api/backtest", params={"asset": "BTC", "strategy": "engine"})
+
+    assert response.status_code == 200
+    body = response.json()
+
+    valores = [point["valor"] for point in body["exposure_curve_estrategia"]]
+    assert any(v < 0.0 for v in valores)  # el engine SÍ puede ir corto, a diferencia de vol targeting
+
+
 def test_get_backtest_strategy_selector_gives_different_results_per_strategy() -> None:
     responses = {
         strategy: client.get("/api/backtest", params={"asset": "BTC", "strategy": strategy}).json()

@@ -217,3 +217,44 @@ def test_metrics_exposicion_media_and_hit_rate_are_sane() -> None:
     # prácticamente 1 (salvo el primer día, en 0 por el warmup del shift).
     assert result.metrics["exposicion_media"] == pytest.approx(1.0, abs=0.01)
     assert 0.0 <= result.metrics["hit_rate"] <= 1.0
+
+
+# --------------------------------------------------------------------------
+# Fase 23: `positions` expuesta en BacktestResult + "pct_tiempo_fuera"
+# --------------------------------------------------------------------------
+
+
+def test_backtest_result_exposes_the_effective_position_series() -> None:
+    idx = pd.date_range("2020-01-01", periods=4, freq="D")
+    asset_returns = pd.Series([0.01, 0.02, -0.01, 0.03], index=idx)
+    positions = pd.Series([1.0, 1.0, -1.0, -1.0], index=idx)
+
+    result = run_backtest(asset_returns, positions, cost_bps=0.0)
+
+    # Igual que en test_cost_bps_is_subtracted_via_turnover_exactly: la
+    # posición EFECTIVA es positions.shift(1) con el primer día en 0.
+    expected = pd.Series([0.0, 1.0, 1.0, -1.0], index=idx)
+    pd.testing.assert_series_equal(result.positions, expected, check_names=False)
+
+
+def test_pct_tiempo_fuera_is_zero_for_always_invested_strategy() -> None:
+    asset_returns = _synthetic_returns()
+    positions = pd.Series(1.0, index=asset_returns.index)
+
+    result = run_backtest(asset_returns, positions, cost_bps=0.0)
+
+    # Solo el primer día (warmup del shift, sin decisión previa) cuenta como
+    # "afuera" — sobre una serie larga, la fracción es prácticamente 0.
+    assert result.metrics["pct_tiempo_fuera"] == pytest.approx(1.0 / len(asset_returns), abs=1e-9)
+
+
+def test_pct_tiempo_fuera_is_higher_when_strategy_spends_time_flat() -> None:
+    idx = pd.date_range("2020-01-01", periods=10, freq="D")
+    asset_returns = pd.Series(0.01, index=idx)
+    # Afuera del mercado (posición 0) la mitad de los días.
+    positions = pd.Series([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0], index=idx)
+
+    always_invested = run_backtest(asset_returns, pd.Series(1.0, index=idx), cost_bps=0.0)
+    half_flat = run_backtest(asset_returns, positions, cost_bps=0.0)
+
+    assert half_flat.metrics["pct_tiempo_fuera"] > always_invested.metrics["pct_tiempo_fuera"]

@@ -161,6 +161,8 @@ export interface BacktestResponse {
   /** Fase 21: curva "underwater" completa (siempre <= 0) de cada lado. */
   drawdown_curve_estrategia: EquityPoint[];
   drawdown_curve_buy_and_hold: EquityPoint[];
+  /** Fase 23: posición efectiva de la estrategia en cada fecha, en [-1, 1]. */
+  exposure_curve_estrategia: EquityPoint[];
 }
 
 export interface BacktestStrategyInfo {

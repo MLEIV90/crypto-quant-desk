@@ -108,7 +108,8 @@ def backtest_pair(
     - "returns": `pd.Series`, retornos diarios de la estrategia (netos de costos).
     - "metrics": dict de `run_backtest` — "total_return", "cagr", "ann_vol",
       "sharpe", "sortino", "max_drawdown", "calmar", "turnover_total",
-      "turnover_medio_diario", "n_trades", "exposicion_media", "hit_rate".
+      "turnover_medio_diario", "n_trades", "exposicion_media",
+      "pct_tiempo_fuera", "hit_rate".
     - "spread": `pd.Series`, el spread NIVEL (para graficarlo).
     - "zscore": `pd.Series`, el z-score expansivo del spread (mismo índice que "spread").
     - "eventos": `pd.Series` de strings ("entrada_larga"/"entrada_corta"/"cierre"/"stop_loss"/"").

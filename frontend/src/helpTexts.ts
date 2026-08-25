@@ -157,6 +157,14 @@ export const BACKTEST_STRATEGY_SELECTOR_HELP =
   "siempre 100% invertido, sin señal de ningún tipo) para ver si de verdad aportan algo, y entre sí para ver qué " +
   "problema resuelve cada una.";
 
+export const BACKTEST_EXPOSURE_HELP =
+  "Fase 23: los gráficos de arriba muestran el RESULTADO (equity, drawdown); este muestra el COMPORTAMIENTO — " +
+  "cuánto invertida estuvo la estrategia en cada fecha, con el mismo desfase de un día que ya aplica el " +
+  "backtest (la decisión de HOY recién es efectiva mañana). Vol targeting se mueve entre 0 (afuera, típicamente " +
+  "solo durante el arranque) y 1 (100% largo, nunca corto); las estrategias con señal direccional (engine, " +
+  "combinado) pueden bajar hasta -1 (100% corto) o pasar por 0 (afuera del mercado) — ver EN QUÉ MOMENTOS pasó " +
+  "cada cosa es lo que este gráfico agrega sobre las métricas resumidas de la tabla.";
+
 export const BACKTEST_PARAMS_HELP =
   "El costo de transacción (en basis points, 1 bp = 0.01%) se cobra sobre cada cambio de tamaño de posición — " +
   "estrategias que operan más seguido son más sensibles a subirlo. El rango de fechas recorta la VENTANA del " +
@@ -174,6 +182,8 @@ export const BACKTEST_METRIC_HELP: Record<string, string> = {
   sortino: "Como el Sharpe, pero solo penaliza la volatilidad A LA BAJA — las subidas bruscas no lo perjudican. Más alto es mejor.",
   max_drawdown: "La peor caída, de punta a punta, desde un máximo hasta el mínimo posterior en todo el período — cuánto tuviste que aguantar en el peor momento. Se expresa como número negativo: más cerca de 0% es mejor (menos dolor).",
   calmar: "Retorno anualizado dividido por el máximo drawdown: cuánto retorno obtuviste por cada unidad de 'dolor' de la peor caída. Más alto es mejor.",
+  exposicion_media: "Fase 23: el tamaño de posición PROMEDIO en valor absoluto a lo largo de todo el período (100% = siempre a full, 0% = siempre afuera). Complementa a 'cambios de dirección': vol targeting puede mostrar 1 cambio de dirección Y una exposición promedio bien por debajo del 100% si reduce tamaño seguido. Ni mejor ni peor por sí sola.",
+  pct_tiempo_fuera: "Fase 23: qué fracción de los días la posición efectiva fue EXACTAMENTE cero (afuera del mercado del todo) — incluye el primer día (sin decisión previa) y el arranque de estrategias con ventanas de cálculo. Una estrategia siempre invertida (buy & hold, vol targeting) muestra un número casi nulo acá; una con señal direccional que sale del mercado seguido (engine, combinado) muestra bastante más.",
   n_trades: "Fase 22: cuántas veces la estrategia cambió de SIGNO (pasó de estar afuera/corta a larga, o viceversa) — NO cuenta los ajustes de TAMAÑO dentro de la misma dirección, eso lo refleja el turnover de la fila de abajo. Una estrategia que siempre está comprada (p. ej. vol targeting puro) puede mostrar 1 acá y aun así rebalancear todos los días: nunca cambia de signo, pero sí cambia de tamaño constantemente. Ni mejor ni peor por sí solo.",
   turnover_total: "Cuánto 'movimiento' de posición hubo en total — más turnover implica más costos de transacción reales. Más bajo es mejor en igualdad de retorno, no es un fin en sí mismo.",
 };

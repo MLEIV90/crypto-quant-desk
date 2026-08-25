@@ -264,6 +264,11 @@ class BacktestResponse(BaseModel):
     completa (`metrics.risk_measures.drawdown_series`) de cada lado, para el
     gráfico que muestra POR QUÉ una estrategia sufre menos que la otra, no
     solo su peor valor puntual (ya en `metrics_*["max_drawdown"]`).
+    `exposure_curve_estrategia` (Fase 23): la posición EFECTIVA de la
+    estrategia elegida en cada fecha (`backtest.engine.BacktestResult.positions`,
+    ya con el desfase anti-lookahead aplicado) — en [-1, 1]. Solo del lado
+    de la estrategia (no del buy & hold, que es trivialmente 1.0 todo el
+    tiempo y no aporta nada graficado aparte).
     """
 
     asset: str
@@ -277,6 +282,7 @@ class BacktestResponse(BaseModel):
     equity_curve_buy_and_hold: list[EquityPoint]
     drawdown_curve_estrategia: list[EquityPoint]
     drawdown_curve_buy_and_hold: list[EquityPoint]
+    exposure_curve_estrategia: list[EquityPoint]
 
 
 class BacktestStrategyInfo(BaseModel):

@@ -88,7 +88,8 @@ def test_backtest_pair_returns_expected_keys_and_aligned_series() -> None:
     assert set(result.keys()) == {"equity_curve", "returns", "metrics", "spread", "zscore", "eventos"}
     expected_metric_keys = {
         "total_return", "cagr", "ann_vol", "sharpe", "sortino", "max_drawdown", "calmar",
-        "turnover_total", "turnover_medio_diario", "n_trades", "exposicion_media", "hit_rate",
+        "turnover_total", "turnover_medio_diario", "n_trades", "exposicion_media", "pct_tiempo_fuera",
+        "hit_rate",
     }
     assert set(result["metrics"].keys()) == expected_metric_keys
     # "spread"/"zscore"/"eventos" están alineados entre sí (misma cantidad de fechas).

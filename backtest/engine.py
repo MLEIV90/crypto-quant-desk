@@ -77,16 +77,23 @@ class BacktestResult:
         Retornos DECIMALES diarios de la estrategia (ya netos de costos,
         con la posición efectiva desplazada un día — ver regla
         anti-lookahead del docstring del módulo).
+    positions:
+        La POSICIÓN EFECTIVA (`positions.shift(1)`, ya con el desfase
+        anti-lookahead aplicado) que de verdad generó cada retorno de
+        `returns` — en [-1, 1]. Expuesta (Fase 21) para poder graficar la
+        exposición de la estrategia en el tiempo (qué hizo y cuándo), no
+        solo el resultado final.
     metrics:
         Dict de métricas: "total_return", "cagr", "ann_vol", "sharpe",
         "sortino", "max_drawdown", "calmar" (reutilizadas de
         `metrics.risk_measures`), más "turnover_total",
-        "turnover_medio_diario", "n_trades", "exposicion_media", "hit_rate"
-        (propias del backtest).
+        "turnover_medio_diario", "n_trades", "exposicion_media",
+        "pct_tiempo_fuera", "hit_rate" (propias del backtest).
     """
 
     equity_curve: pd.Series
     returns: pd.Series
+    positions: pd.Series
     metrics: dict[str, float]
 
 
@@ -194,6 +201,12 @@ def run_backtest(
         "turnover_medio_diario": float(turnover.mean()),
         "n_trades": n_trades,
         "exposicion_media": float(position_effective.abs().mean()),
+        # Fase 23: complementa a "n_trades" (cambios de SIGNO) para
+        # estrategias que nunca cambian de signo (vol targeting, buy & hold)
+        # pero sí varían de tamaño o pasan tiempo genuinamente fuera del
+        # mercado (posición efectiva EXACTAMENTE 0 — incluye el primer día,
+        # sin decisión previa, y el warmup de indicadores/ventanas rolling).
+        "pct_tiempo_fuera": float((position_effective == 0.0).mean()),
         "hit_rate": float((strategy_returns > 0.0).mean()),
     }
 
@@ -203,7 +216,7 @@ def run_backtest(
         metrics["max_drawdown"] * 100, n_trades,
     )
 
-    return BacktestResult(equity_curve=equity, returns=strategy_returns, metrics=metrics)
+    return BacktestResult(equity_curve=equity, returns=strategy_returns, positions=position_effective, metrics=metrics)
 
 
 def backtest_from_prices(
