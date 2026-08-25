@@ -45,7 +45,7 @@ const METRIC_ROWS: MetricRow[] = [
   { key: "sortino", label: "Sortino", format: (v) => v.toFixed(2) },
   { key: "max_drawdown", label: "Max. drawdown", format: (v) => `${(v * 100).toFixed(2)}%` },
   { key: "calmar", label: "Calmar", format: (v) => v.toFixed(2) },
-  { key: "n_trades", label: "N° de trades", format: (v) => v.toFixed(0) },
+  { key: "n_trades", label: "Cambios de dirección", format: (v) => v.toFixed(0) },
   { key: "turnover_total", label: "Turnover total", format: (v) => v.toFixed(2) },
 ];
 

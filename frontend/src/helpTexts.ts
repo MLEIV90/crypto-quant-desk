@@ -98,13 +98,14 @@ export const RISK_REGIME_STRIP_HELP =
 // Fase 20b: vol targeting comparado contra buy & hold, y tabla de riesgo de las 5 monedas.
 
 export const RISK_VOL_TARGETING_HELP =
-  "Vol targeting, en criollo: en vez de invertir siempre el mismo tamaño, la estrategia reduce la exposición " +
-  "cuando el activo está más volátil de lo normal y la aumenta cuando está más tranquilo — apunta a que el " +
-  "RIESGO de la cartera sea parejo en el tiempo, no el capital invertido. Acá se compara la estrategia " +
-  "completa del motor de señales (dirección + este sizing por volatilidad) contra comprar y mantener, con " +
-  "los mismos costos de transacción para los dos. El objetivo NO es ganar más — de hecho suele ganar algo " +
-  "menos en un mercado alcista sostenido — sino sufrir MENOS en las caídas: mirá la comparación de máximo " +
-  "drawdown, no solo el retorno final.";
+  "Vol targeting, en criollo: en vez de invertir siempre el mismo tamaño, reduce la exposición cuando el " +
+  "activo está más volátil de lo normal y la aumenta cuando está más tranquilo — apunta a que el RIESGO de " +
+  "la cartera sea parejo en el tiempo, no el capital invertido. SIEMPRE está comprado, nunca adivina la " +
+  "dirección: por eso, solo, reduce el drawdown de forma modesta (sigue expuesto en las caídas, nada más " +
+  "que con menos tamaño). La columna 'Engine + vol targeting' agrega la señal direccional del motor de " +
+  "señales encima de ese mismo sizing — esa combinación es la que puede salirse del mercado en una caída, " +
+  "y por eso el drawdown baja mucho más ahí. Mostrar las tres por separado (Fase 22) es a propósito: antes " +
+  "esta sección le atribuía el resultado de la combinación al vol targeting solo, algo que no era cierto.";
 
 export const RISK_SUMMARY_HELP =
   "Comparación de riesgo actual entre las 5 monedas — cuál está más volátil o en tensión hoy. El régimen y el " +
@@ -173,7 +174,7 @@ export const BACKTEST_METRIC_HELP: Record<string, string> = {
   sortino: "Como el Sharpe, pero solo penaliza la volatilidad A LA BAJA — las subidas bruscas no lo perjudican. Más alto es mejor.",
   max_drawdown: "La peor caída, de punta a punta, desde un máximo hasta el mínimo posterior en todo el período — cuánto tuviste que aguantar en el peor momento. Se expresa como número negativo: más cerca de 0% es mejor (menos dolor).",
   calmar: "Retorno anualizado dividido por el máximo drawdown: cuánto retorno obtuviste por cada unidad de 'dolor' de la peor caída. Más alto es mejor.",
-  n_trades: "Cantidad de operaciones (cambios de posición) que ejecutó la estrategia durante el período. Ni mejor ni peor por sí solo, pero más operaciones implica más costos reales de transacción.",
+  n_trades: "Fase 22: cuántas veces la estrategia cambió de SIGNO (pasó de estar afuera/corta a larga, o viceversa) — NO cuenta los ajustes de TAMAÑO dentro de la misma dirección, eso lo refleja el turnover de la fila de abajo. Una estrategia que siempre está comprada (p. ej. vol targeting puro) puede mostrar 1 acá y aun así rebalancear todos los días: nunca cambia de signo, pero sí cambia de tamaño constantemente. Ni mejor ni peor por sí solo.",
   turnover_total: "Cuánto 'movimiento' de posición hubo en total — más turnover implica más costos de transacción reales. Más bajo es mejor en igualdad de retorno, no es un fin en sí mismo.",
 };
 

@@ -80,13 +80,29 @@ export function RiskView({ asset, onAssetChange }: RiskViewProps) {
   // cambiar de activo (incluso haciendo clic en esta misma tabla) no debe
   // disparar un refetch de esto.
   const riskSummaryQuery = useQuery({ queryKey: ["risk-summary"], queryFn: getRiskSummary });
-  const backtestQuery = useQuery({ queryKey: ["backtest", asset], queryFn: () => getBacktest(asset) });
+  // Fase 22: dos backtests, no uno — antes esta sección pedía el default
+  // "combo" (dirección del engine + vol targeting) y le atribuía el
+  // resultado a "vol targeting" a secas. Ahora se piden las DOS estrategias
+  // por separado para poder mostrar la descomposición real (ver más abajo):
+  // cuánto aporta el sizing por volatilidad SOLO vs. cuánto aporta
+  // combinarlo con la señal direccional. Ambas devuelven el mismo
+  // buy & hold (mismo activo/costos), se usa el de `comboQuery` para la
+  // comparación.
+  const backtestVolTargetingQuery = useQuery({
+    queryKey: ["backtest", asset, "vol_targeting"],
+    queryFn: () => getBacktest(asset, { strategy: "vol_targeting" }),
+  });
+  const backtestComboQuery = useQuery({
+    queryKey: ["backtest", asset, "combo"],
+    queryFn: () => getBacktest(asset, { strategy: "combo" }),
+  });
 
   const risk = riskQuery.data;
   const garch = garchQuery.data;
   const price = priceQuery.data;
   const riskSummary = riskSummaryQuery.data;
-  const backtest = backtestQuery.data;
+  const backtestVolTargeting = backtestVolTargetingQuery.data;
+  const backtestCombo = backtestComboQuery.data;
 
   const isLoading = riskQuery.isLoading || garchQuery.isLoading || priceQuery.isLoading;
   const error = riskQuery.error ?? garchQuery.error ?? priceQuery.error;
@@ -209,65 +225,110 @@ export function RiskView({ asset, onAssetChange }: RiskViewProps) {
       )}
 
       <h3 className="panel-subtitle">
-        El valor de gestionar el riesgo
+        El valor de gestionar el riesgo: qué aporta cada pieza
         <InfoTooltip text={RISK_VOL_TARGETING_HELP} />
       </h3>
       <p className="view-note">
-        El vol targeting no busca ganar más — busca sufrir menos: reduce el tamaño de la posición cuando el
-        activo está más volátil de lo normal, a costa de algo de retorno en los mercados alcistas.
+        El vol targeting SOLO (siempre comprado, solo ajusta el tamaño según la volatilidad) reduce el
+        drawdown de forma modesta. El salto grande viene de COMBINARLO con la señal direccional del
+        engine, que además se sale del mercado en las malas — se muestran las tres para que se vea qué
+        aporta cada pieza, no solo el resultado final combinado.
       </p>
-      {backtestQuery.isLoading && (
-        <StatusMessage kind="loading">Corriendo backtest de {asset} con y sin vol targeting…</StatusMessage>
+      {(backtestVolTargetingQuery.isLoading || backtestComboQuery.isLoading) && (
+        <StatusMessage kind="loading">Corriendo backtest de {asset} (buy & hold, vol targeting y combinado)…</StatusMessage>
       )}
-      {backtestQuery.error && (
+      {(backtestVolTargetingQuery.error || backtestComboQuery.error) && (
         <StatusMessage kind="error">
-          {backtestQuery.error instanceof ApiError ? backtestQuery.error.message : String(backtestQuery.error)}
+          {(() => {
+            const err = backtestVolTargetingQuery.error ?? backtestComboQuery.error;
+            return err instanceof ApiError ? err.message : String(err);
+          })()}
         </StatusMessage>
       )}
-      {backtest && (
+      {backtestVolTargeting && backtestCombo && (
         <>
-          <div className="metric-grid">
-            <MetricCard
-              label="Máx. drawdown — buy & hold"
-              value={`${(backtest.metrics_buy_and_hold.max_drawdown * 100).toFixed(1)}%`}
-              valueColor={COLORS.danger}
-            />
-            <MetricCard
-              label="Máx. drawdown — con vol targeting"
-              value={`${(backtest.metrics_estrategia.max_drawdown * 100).toFixed(1)}%`}
-              valueColor={
-                backtest.metrics_estrategia.max_drawdown > backtest.metrics_buy_and_hold.max_drawdown
-                  ? COLORS.success
-                  : COLORS.danger
-              }
-            />
-            <MetricCard
-              label="Sharpe — buy & hold"
-              value={backtest.metrics_buy_and_hold.sharpe.toFixed(2)}
-            />
-            <MetricCard
-              label="Sharpe — con vol targeting"
-              value={backtest.metrics_estrategia.sharpe.toFixed(2)}
-              valueColor={
-                backtest.metrics_estrategia.sharpe >= backtest.metrics_buy_and_hold.sharpe
-                  ? COLORS.success
-                  : undefined
-              }
-            />
-          </div>
+          <table className="metrics-table">
+            <thead>
+              <tr>
+                <th>Métrica</th>
+                <th>Buy &amp; hold</th>
+                <th>Vol targeting (solo)</th>
+                <th>Engine + vol targeting</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Máx. drawdown</td>
+                <td style={{ color: COLORS.danger }}>
+                  {(backtestVolTargeting.metrics_buy_and_hold.max_drawdown * 100).toFixed(1)}%
+                </td>
+                <td
+                  style={{
+                    color:
+                      backtestVolTargeting.metrics_estrategia.max_drawdown >
+                      backtestVolTargeting.metrics_buy_and_hold.max_drawdown
+                        ? COLORS.success
+                        : COLORS.danger,
+                  }}
+                >
+                  {(backtestVolTargeting.metrics_estrategia.max_drawdown * 100).toFixed(1)}%
+                </td>
+                <td
+                  style={{
+                    color:
+                      backtestCombo.metrics_estrategia.max_drawdown > backtestCombo.metrics_buy_and_hold.max_drawdown
+                        ? COLORS.success
+                        : COLORS.danger,
+                  }}
+                >
+                  {(backtestCombo.metrics_estrategia.max_drawdown * 100).toFixed(1)}%
+                </td>
+              </tr>
+              <tr>
+                <td>Sharpe</td>
+                <td>{backtestVolTargeting.metrics_buy_and_hold.sharpe.toFixed(2)}</td>
+                <td
+                  style={{
+                    color:
+                      backtestVolTargeting.metrics_estrategia.sharpe >= backtestVolTargeting.metrics_buy_and_hold.sharpe
+                        ? COLORS.success
+                        : undefined,
+                  }}
+                >
+                  {backtestVolTargeting.metrics_estrategia.sharpe.toFixed(2)}
+                </td>
+                <td
+                  style={{
+                    color:
+                      backtestCombo.metrics_estrategia.sharpe >= backtestCombo.metrics_buy_and_hold.sharpe
+                        ? COLORS.success
+                        : undefined,
+                  }}
+                >
+                  {backtestCombo.metrics_estrategia.sharpe.toFixed(2)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
           <LineChartPanel
             series={[
               {
-                id: "estrategia",
-                label: "Con vol targeting",
-                color: COLORS.equityStrategy,
-                data: backtest.equity_curve_estrategia.map((point) => ({ time: point.fecha, value: point.valor })),
+                id: "buy-hold",
+                label: "Buy & hold",
+                color: COLORS.equityBuyHold,
+                data: backtestCombo.equity_curve_buy_and_hold.map((point) => ({ time: point.fecha, value: point.valor })),
               },
               {
-                id: "buy-hold",
-                label: "Buy & hold (sin vol targeting)",
-                color: COLORS.equityBuyHold,
-                data: backtest.equity_curve_buy_and_hold.map((point) => ({ time: point.fecha, value: point.valor })),
+                id: "vol-targeting",
+                label: "Vol targeting (solo)",
+                color: COLORS.equityStrategy,
+                data: backtestVolTargeting.equity_curve_estrategia.map((point) => ({ time: point.fecha, value: point.valor })),
+              },
+              {
+                id: "combo",
+                label: "Engine + vol targeting",
+                color: COLORS.bollinger,
+                data: backtestCombo.equity_curve_estrategia.map((point) => ({ time: point.fecha, value: point.valor })),
               },
             ]}
             height={320}
