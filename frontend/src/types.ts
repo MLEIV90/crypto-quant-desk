@@ -285,12 +285,22 @@ export interface StatsResponse {
   heatmap_mensual: MonthlyYearlyHeatmap;
 }
 
+export interface AssetRiskComparison {
+  vol_anualizada: number;
+  max_drawdown: number;
+  sharpe: number;
+}
+
 export interface CompareResponse {
   assets: string[];
   interval: string;
   fechas: string[];
+  /** Fase 27: primera fecha de 'fechas' — null si no hay ninguna fecha común. */
+  fecha_base: string | null;
   series: Record<string, (number | null)[]>;
   rendimiento_total_pct: Record<string, number>;
+  /** Fase 27: vol/max drawdown/Sharpe de cada activo sobre el MISMO período. */
+  riesgo: Record<string, AssetRiskComparison>;
 }
 
 export interface CorrelationResponse {

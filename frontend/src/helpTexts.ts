@@ -304,14 +304,31 @@ export const STATS_SYNTHESIS_TEXT =
 // --------------------------------------------------------------------------
 
 export const COMPARISON_INTRO_HELP =
-  "Comparación de rendimiento histórico normalizado: todas las monedas elegidas arrancan en 100 el mismo " +
-  "día (la fecha más reciente en que TODAS tienen dato) y desde ahí se ve cuánto creció cada una en " +
-  "términos relativos. El desempeño pasado NO predice el futuro.";
+  "Comparación de rendimiento histórico normalizado: todas las monedas elegidas arrancan en 100 en la " +
+  "primera fecha en que TODAS tienen dato dentro del período elegido, y desde ahí se ve cuánto creció cada " +
+  "una en términos relativos. El desempeño pasado NO predice el futuro.";
+
+export const COMPARISON_LOG_SCALE_HELP =
+  "Fase 27: en escala LINEAL, una moneda que subió mucho más que las demás (por ejemplo +2000% contra " +
+  "+400%) aplasta visualmente a las otras — todas las líneas de abajo se ven casi planas en comparación. En " +
+  "escala LOGARÍTMICA la misma variación porcentual ocupa el mismo espacio vertical en cualquier nivel, así " +
+  "que se puede comparar el comportamiento de todas las monedas aunque una haya subido muchas veces más que " +
+  "otra. Empieza activada por default porque es la que realmente sirve para comparar.";
+
+export const COMPARISON_RISK_HONEST_TEXT =
+  "Rendimiento alto suele venir acompañado de riesgo alto — no es una coincidencia, es la relación más " +
+  "básica de las finanzas. 'Quién subió más' (rendimiento) y 'quién rindió mejor ajustado por riesgo' " +
+  "(Sharpe) no son la misma pregunta, y pueden dar respuestas distintas: una moneda puede liderar el " +
+  "ranking de rendimiento y quedar peor posicionada en volatilidad, drawdown o Sharpe. Mirá las cuatro " +
+  "columnas de la tabla antes de sacar conclusiones sobre cuál 'rindió mejor' — coherente con el resto de " +
+  "esta herramienta, que se enfoca en gestionar riesgo, no en perseguir el rendimiento más alto.";
 
 export const COMPARISON_RANKING_HELP =
-  "Rendimiento total del período elegido, de mejor a peor. Es el mismo dato que muestra el gráfico (dónde " +
-  "termina cada línea), solo ordenado — no es un ranking de calidad del activo, solo de cómo le fue en " +
-  "ESTE período puntual.";
+  "Cuatro métricas del MISMO período elegido, no solo rendimiento: rendimiento total (dónde termina cada " +
+  "línea del gráfico), volatilidad anualizada (cuánto se movió el precio en el camino), máximo drawdown " +
+  "(la peor caída que tuviste que aguantar) y Sharpe (retorno ajustado por volatilidad). Hacé clic en el " +
+  "encabezado de una columna para ordenar por esa métrica — no es un ranking de calidad del activo, solo de " +
+  "cómo le fue en ESTE período puntual.";
 
 // --------------------------------------------------------------------------
 // Vista "Arbitraje" (Fase 12b) — /api/pairs/screening, /api/pairs/detail.

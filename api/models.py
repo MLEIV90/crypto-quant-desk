@@ -840,11 +840,26 @@ class CorrelationResponse(BaseModel):
     )
 
 
+class AssetRiskComparison(BaseModel):
+    """Métricas de riesgo/performance de UN activo (Fase 27), calculadas
+    sobre la MISMA ventana que `CompareResponse.rendimiento_total_pct` (no
+    toda la historia del activo) — reutiliza `metrics.risk_measures` tal
+    cual, vía `analysis.comparison.compare_assets`. Junto con el
+    rendimiento, permite ver que "quién subió más" y "quién rindió mejor
+    ajustado por riesgo" pueden ser respuestas distintas.
+    """
+
+    vol_anualizada: float = Field(description="Volatilidad anualizada de los retornos del activo en el período comparado")
+    max_drawdown: float = Field(description="Máximo drawdown en el período comparado (negativo o cero)")
+    sharpe: float = Field(description="Sharpe ratio (rf=0) de los retornos del activo en el período comparado")
+
+
 class CompareResponse(BaseModel):
-    """Respuesta de `GET /api/compare` (Fase 12a) — reutiliza
-    `analysis.comparison.compare_assets` tal cual. Comparación de
-    DESEMPEÑO HISTÓRICO normalizado, no una predicción — el desempeño
-    pasado no garantiza el futuro (ver el texto que muestra el frontend).
+    """Respuesta de `GET /api/compare` (Fase 12a, riesgo agregado en Fase
+    27) — reutiliza `analysis.comparison.compare_assets` tal cual.
+    Comparación de DESEMPEÑO HISTÓRICO normalizado, no una predicción — el
+    desempeño pasado no garantiza el futuro (ver el texto que muestra el
+    frontend).
     """
 
     assets: list[str] = Field(description="Activos pedidos, en el orden en que se comparan")
@@ -852,9 +867,16 @@ class CompareResponse(BaseModel):
     fechas: list[datetime] = Field(
         description="Fechas COMUNES a todos los activos (inner join) dentro de la ventana pedida"
     )
+    fecha_base: datetime | None = Field(
+        description="Primera fecha de 'fechas' — desde cuándo arranca la comparación (todos los activos tienen "
+        "dato desde acá). None si no hay ninguna fecha común entre los activos pedidos."
+    )
     series: dict[str, list[float | None]] = Field(
         description="Por activo: serie normalizada a base 100 en la primera fecha de 'fechas'"
     )
     rendimiento_total_pct: dict[str, float] = Field(
         description="Por activo: rendimiento total del período, en puntos porcentuales (equivalente a series[activo][-1] - 100)"
+    )
+    riesgo: dict[str, AssetRiskComparison] = Field(
+        description="Por activo: volatilidad anualizada, máximo drawdown y Sharpe del MISMO período que rendimiento_total_pct"
     )

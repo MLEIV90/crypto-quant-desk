@@ -7,6 +7,8 @@ import pandas as pd
 import pytest
 
 from analysis.comparison import align_common_dates, compare_assets, normalize_to_base
+from metrics.risk_measures import annualized_volatility, max_drawdown, sharpe_ratio
+from signals.returns import simple_returns
 
 
 # --------------------------------------------------------------------------
@@ -132,3 +134,46 @@ def test_compare_assets_returns_empty_when_no_common_dates() -> None:
 
     assert result["rendimiento_total_pct"] == {}
     assert len(result["fechas"]) == 0
+    assert result["riesgo"] == {}
+
+
+# --------------------------------------------------------------------------
+# compare_assets — riesgo (Fase 27)
+# --------------------------------------------------------------------------
+
+
+def test_compare_assets_risk_metrics_match_computing_them_separately() -> None:
+    idx = pd.date_range("2021-01-01", periods=200, freq="D", tz="UTC")
+    rng_btc = np.random.default_rng(0)
+    rng_eth = np.random.default_rng(1)
+    prices = {
+        "BTC": pd.Series(30000.0 * np.exp(np.cumsum(rng_btc.normal(0.001, 0.03, 200))), index=idx),
+        "ETH": pd.Series(2000.0 * np.exp(np.cumsum(rng_eth.normal(0.0005, 0.04, 200))), index=idx),
+    }
+
+    result = compare_assets(prices, limit=200)
+
+    for asset in ("BTC", "ETH"):
+        # Las métricas de riesgo deben salir de aplicar risk_measures TAL
+        # CUAL sobre los retornos simples de la MISMA ventana recortada que
+        # ya usa compare_assets para el rendimiento — no un cálculo aparte
+        # sobre toda la historia del activo.
+        expected_returns = simple_returns(prices[asset].tail(200)).dropna()
+        assert result["riesgo"][asset]["vol_anualizada"] == pytest.approx(annualized_volatility(expected_returns))
+        assert result["riesgo"][asset]["max_drawdown"] == pytest.approx(max_drawdown(expected_returns))
+        assert result["riesgo"][asset]["sharpe"] == pytest.approx(sharpe_ratio(expected_returns))
+
+
+def test_compare_assets_risk_metrics_use_the_same_recortada_window_as_rendimiento() -> None:
+    # Mismo escenario que test_compare_assets_respects_limit_using_only_recent_window:
+    # con limit=10 sobre una serie plana en los últimos 10 días, la vol y el
+    # drawdown del período deben reflejar SOLO esos 10 días (~0), no los 90
+    # días de subida previos.
+    idx = pd.date_range("2021-01-01", periods=100, freq="D", tz="UTC")
+    values = np.concatenate([np.linspace(100.0, 1000.0, 90), np.full(10, 1000.0)])
+    prices = {"BTC": pd.Series(values, index=idx), "ETH": pd.Series(values, index=idx)}
+
+    result = compare_assets(prices, limit=10)
+
+    assert result["riesgo"]["BTC"]["vol_anualizada"] == pytest.approx(0.0, abs=1e-9)
+    assert result["riesgo"]["BTC"]["max_drawdown"] == pytest.approx(0.0, abs=1e-9)

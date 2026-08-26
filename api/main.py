@@ -61,6 +61,7 @@ from analysis.statistics import (
 )
 from api.models import (
     AdfResult,
+    AssetRiskComparison,
     AssetsResponse,
     AutocorrelationPoint,
     BacktestResponse,
@@ -1366,15 +1367,17 @@ def get_compare(
     ),
 ) -> CompareResponse:
     """Reutiliza `data.loaders.get_prices` (vía `_load_df`) para cargar cada
-    activo y `analysis.comparison.compare_assets` (Fase 12a) para alinear
-    por fechas comunes, recortar a las últimas `limit` fechas y normalizar
-    cada serie a base 100 — ningún cálculo nuevo vive acá.
+    activo y `analysis.comparison.compare_assets` (Fase 12a, riesgo
+    agregado en Fase 27) para alinear por fechas comunes, recortar a las
+    últimas `limit` fechas, normalizar cada serie a base 100 y calcular
+    vol/max drawdown/Sharpe de cada activo sobre esa misma ventana —
+    ningún cálculo nuevo vive acá.
 
     Comparación de DESEMPEÑO HISTÓRICO normalizado, no una predicción — ver
     `CompareResponse`/el texto que muestra el frontend. Si dos activos no
     tienen NINGUNA fecha en común (no pasa con `config.UNIVERSE` actual,
-    pero es posible en teoría), devuelve `fechas`/`series` vacíos en vez de
-    fallar.
+    pero es posible en teoría), devuelve `fechas`/`series`/`riesgo` vacíos y
+    `fecha_base=None` en vez de fallar.
     """
     asset_list = [a.strip().upper() for a in assets.split(",") if a.strip()]
     if not asset_list:
@@ -1384,13 +1387,23 @@ def get_compare(
     prices: dict[str, pd.Series] = {asset: _load_df(asset, interval)["close"] for asset in asset_list}
 
     result = compare_assets(prices, limit=limit)
+    fechas = _dates_to_list(result["fechas"])
 
     return CompareResponse(
         assets=asset_list,
         interval=interval,
-        fechas=_dates_to_list(result["fechas"]),
+        fechas=fechas,
+        fecha_base=fechas[0] if fechas else None,
         series={asset: _series_to_list(result["normalizado"][asset]) for asset in asset_list},
         rendimiento_total_pct=result["rendimiento_total_pct"],
+        riesgo={
+            asset: AssetRiskComparison(
+                vol_anualizada=result["riesgo"][asset]["vol_anualizada"],
+                max_drawdown=result["riesgo"][asset]["max_drawdown"],
+                sharpe=result["riesgo"][asset]["sharpe"],
+            )
+            for asset in result["riesgo"]
+        },
     )
 
 

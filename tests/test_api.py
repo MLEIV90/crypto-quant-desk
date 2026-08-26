@@ -1076,6 +1076,24 @@ def test_get_compare_all_series_start_at_100() -> None:
         assert body["rendimiento_total_pct"][asset] == pytest.approx(body["series"][asset][-1] - 100.0, abs=1e-6)
 
 
+def test_get_compare_includes_risk_metrics_and_fecha_base() -> None:
+    # Fase 27: además del rendimiento, /api/compare expone vol/max
+    # drawdown/Sharpe por activo (mismo período) y la fecha base común.
+    response = client.get("/api/compare", params={"assets": "BTC,ETH,SOL", "interval": "1d", "limit": 60000})
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["fecha_base"] == body["fechas"][0]
+
+    assert set(body["riesgo"].keys()) == {"BTC", "ETH", "SOL"}
+    for asset in ("BTC", "ETH", "SOL"):
+        metrics = body["riesgo"][asset]
+        assert set(metrics.keys()) == {"vol_anualizada", "max_drawdown", "sharpe"}
+        assert metrics["vol_anualizada"] > 0.0
+        assert metrics["max_drawdown"] <= 0.0
+
+
 def test_get_compare_respects_limit() -> None:
     response = client.get("/api/compare", params={"assets": "BTC,ETH", "interval": "1d", "limit": 30})
 
