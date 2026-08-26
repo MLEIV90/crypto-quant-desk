@@ -311,6 +311,17 @@ export interface CorrelationResponse {
   matriz: (number | null)[][];
 }
 
+export interface RollingCorrelationResponse {
+  asset_a: string;
+  asset_b: string;
+  interval: string;
+  window: number;
+  fechas: string[];
+  correlacion: (number | null)[];
+  correlacion_actual: number | null;
+  correlacion_promedio_historico: number | null;
+}
+
 export interface VolumeProfileResponse {
   asset: string;
   interval: string;

@@ -26,6 +26,7 @@ import type {
   ResearchExperimentsResponse,
   RiskResponse,
   RiskSummaryResponse,
+  RollingCorrelationResponse,
   StatsResponse,
   StudiesResponse,
   SuggesterResponse,
@@ -259,6 +260,28 @@ export function getCompare(assets: string, interval: string, limit: number): Pro
  */
 export function getCorrelation(interval: string, limit: number, method: string): Promise<CorrelationResponse> {
   return apiGet<CorrelationResponse>("/api/correlation", { interval, limit, method });
+}
+
+/**
+ * Fase 29: correlación de Pearson en ventana móvil entre DOS activos a lo
+ * largo del tiempo — ver `api/main.py::get_correlation_rolling`.
+ * `correlacion_actual`/`correlacion_promedio_historico` de la respuesta se
+ * calculan sobre TODA la historia común, no solo sobre `limit`.
+ */
+export function getCorrelationRolling(
+  assetA: string,
+  assetB: string,
+  interval: string,
+  window: number,
+  limit: number,
+): Promise<RollingCorrelationResponse> {
+  return apiGet<RollingCorrelationResponse>("/api/correlation/rolling", {
+    asset_a: assetA,
+    asset_b: assetB,
+    interval,
+    window,
+    limit,
+  });
 }
 
 /**

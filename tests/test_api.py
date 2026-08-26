@@ -1190,6 +1190,68 @@ def test_get_correlation_respects_limit() -> None:
 
 
 # --------------------------------------------------------------------------
+# /api/correlation/rolling (Fase 29)
+# --------------------------------------------------------------------------
+
+
+def test_get_correlation_rolling_returns_expected_fields() -> None:
+    response = client.get(
+        "/api/correlation/rolling", params={"asset_a": "BTC", "asset_b": "ETH", "interval": "1d", "window": 90}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["asset_a"] == "BTC"
+    assert body["asset_b"] == "ETH"
+    assert body["window"] == 90
+    assert len(body["fechas"]) == len(body["correlacion"])
+    assert len(body["fechas"]) > 0
+
+    # los primeros window-1 valores son el warmup de la ventana móvil.
+    valores_no_nulos = [v for v in body["correlacion"] if v is not None]
+    assert len(valores_no_nulos) > 0
+    assert all(-1.0 - 1e-6 <= v <= 1.0 + 1e-6 for v in valores_no_nulos)
+
+    # "actual"/"promedio histórico" se calculan sobre TODA la historia
+    # común, no solo sobre lo recortado a 'limit' -- deben ser valores de
+    # correlación válidos, no None, con años de historia diaria disponible.
+    assert body["correlacion_actual"] is not None
+    assert body["correlacion_promedio_historico"] is not None
+    assert -1.0 <= body["correlacion_actual"] <= 1.0
+    assert -1.0 <= body["correlacion_promedio_historico"] <= 1.0
+
+
+def test_get_correlation_rolling_actual_ignores_limit_but_series_respects_it() -> None:
+    full = client.get(
+        "/api/correlation/rolling", params={"asset_a": "BTC", "asset_b": "ETH", "interval": "1d", "window": 90}
+    ).json()
+    limited = client.get(
+        "/api/correlation/rolling",
+        params={"asset_a": "BTC", "asset_b": "ETH", "interval": "1d", "window": 90, "limit": 30},
+    ).json()
+
+    # El recorte a 'limit' solo afecta la serie graficada...
+    assert len(limited["fechas"]) <= 30
+    assert len(full["fechas"]) > len(limited["fechas"])
+    # ...no la base de comparación "actual"/"promedio histórico".
+    assert limited["correlacion_actual"] == pytest.approx(full["correlacion_actual"])
+    assert limited["correlacion_promedio_historico"] == pytest.approx(full["correlacion_promedio_historico"])
+
+
+def test_get_correlation_rolling_unknown_asset_returns_404() -> None:
+    response = client.get("/api/correlation/rolling", params={"asset_a": "BTC", "asset_b": "DOGE"})
+
+    assert response.status_code == 404
+
+
+def test_get_correlation_rolling_invalid_interval_returns_400() -> None:
+    response = client.get("/api/correlation/rolling", params={"asset_a": "BTC", "asset_b": "ETH", "interval": "5m"})
+
+    assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------
 # /api/pairs/screening y /api/pairs/detail (Fase 12b)
 # --------------------------------------------------------------------------
 
@@ -1417,6 +1479,7 @@ def test_docs_and_openapi_schema_are_available() -> None:
         "/api/research-experiments",
         "/api/data-status", "/api/refresh", "/api/stats", "/api/compare",
         "/api/pairs/screening", "/api/pairs/detail", "/api/volume-profile", "/api/correlation",
+        "/api/correlation/rolling",
         "/api/report", "/api/export/ohlcv", "/api/export/drawdowns", "/api/export/correlation",
         "/api/risk-summary",
     }

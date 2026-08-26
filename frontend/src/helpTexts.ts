@@ -396,7 +396,37 @@ export const CORRELATION_INTRO_HELP =
   "que eso diga nada sobre cómo se mueven día a día. Correlación cercana a +1 = se mueven casi juntas " +
   "(poca diversificación real entre ellas); cercana a 0 = se mueven independientes; cercana a -1 = se " +
   "mueven en sentido opuesto. Las correlaciones NO son fijas — cambian con el tiempo y con el período " +
-  "elegido, esto es una foto del rango de arriba, no una constante del mercado.";
+  "elegido, esto es una foto del rango de arriba, no una constante del mercado. El gráfico de más abajo " +
+  "muestra justamente ESO: cómo cambia en el tiempo.";
+
+export const CORRELATION_ROLLING_HELP =
+  "Correlación de Pearson recalculada en una ventana móvil (90 días por defecto) entre las dos monedas " +
+  "elegidas, día a día — a diferencia del mapa de calor de arriba (un único número sobre todo el " +
+  "período), esto muestra CÓMO cambió esa relación con el tiempo. Cuando la línea se dispara hacia 1, la " +
+  "diversificación entre estas dos monedas desaparece — suele pasar justo en las crisis, cuando más se " +
+  "necesitaría que los activos se muevan distinto entre sí.";
+
+export const CORRELATION_DIVERSIFICATION_INTRO =
+  "Traduciendo la matriz de arriba: con todas las correlaciones entre las 5 monedas moviéndose en un " +
+  "rango relativamente alto, este universo ofrece POCA diversificación real — cuando cae una moneda, " +
+  "tienden a caer todas juntas. Tener las 5 en cartera no reduce el riesgo tanto como parecería a simple " +
+  "vista contar 5 activos distintos. Es coherente con el enfoque de este proyecto: la gestión de riesgo " +
+  "(vol targeting, ver la pestaña Riesgo) importa más que la ilusión de diversificar entre criptoactivos " +
+  "que, en la práctica, se mueven juntos la mayor parte del tiempo.";
+
+export const CORRELATION_DIVERSIFICATION_INDEX_HELP =
+  "1 menos la correlación promedio entre todos los pares de la matriz (excluyendo la diagonal, que " +
+  "siempre es 1). Un número cercano a 0 indica que el universo se mueve casi como un solo activo — poca " +
+  "diversificación real entre las monedas elegidas; cercano a 1 indicaría activos genuinamente " +
+  "independientes entre sí. No es una métrica estándar de la industria, es un resumen de lectura rápida " +
+  "de la misma matriz que ya se ve arriba.";
+
+export const CORRELATION_VS_HISTORICAL_HELP =
+  "Compara la correlación 'actual' (el último valor de la ventana móvil) contra el promedio de esa misma " +
+  "correlación rolling a lo largo de TODA la historia común disponible entre las dos monedas — no solo el " +
+  "período que se está graficando. Por encima del promedio histórico sugiere que las dos monedas se están " +
+  "moviendo MÁS juntas que lo habitual (una señal típica de estrés de mercado); por debajo, que se están " +
+  "moviendo más independientes que de costumbre.";
 
 // --------------------------------------------------------------------------
 // Panel de alertas (Fase 8d, ampliado en Fase 13c)

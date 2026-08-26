@@ -6,7 +6,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from eda.eda_report import DESCRIPTIVE_QUANTILES, adf_test, correlation_matrix, descriptive_stats, ljung_box_squared
+from eda.eda_report import (
+    DESCRIPTIVE_QUANTILES,
+    adf_test,
+    correlation_matrix,
+    descriptive_stats,
+    ljung_box_squared,
+    rolling_pairwise_correlation,
+)
 
 
 def test_descriptive_stats_returns_expected_columns_and_single_row() -> None:
@@ -119,3 +126,67 @@ def test_correlation_matrix_spearman_is_robust_to_monotonic_nonlinearity() -> No
 
     assert spearman.loc["A", "B"] == pytest.approx(1.0)
     assert pearson.loc["A", "B"] < 0.999
+
+
+# --------------------------------------------------------------------------
+# rolling_pairwise_correlation (Fase 29)
+# --------------------------------------------------------------------------
+
+
+def test_rolling_pairwise_correlation_matches_manual_window_computation() -> None:
+    rng = np.random.default_rng(5)
+    idx = pd.date_range("2021-01-01", periods=200, freq="D", tz="UTC")
+    a = pd.Series(rng.normal(0.0, 0.02, 200), index=idx)
+    b = pd.Series(rng.normal(0.0, 0.02, 200), index=idx)
+    window = 30
+
+    rolling = rolling_pairwise_correlation(a, b, window=window)
+
+    assert rolling.iloc[: window - 1].isna().all()  # warmup
+    manual = a.iloc[0:window].corr(b.iloc[0:window])
+    assert rolling.iloc[window - 1] == pytest.approx(manual)
+
+    manual_last = a.iloc[-window:].corr(b.iloc[-window:])
+    assert rolling.iloc[-1] == pytest.approx(manual_last)
+
+
+def test_rolling_pairwise_correlation_detects_correlation_spike() -> None:
+    # Dos tramos: primero independientes (correlación ~0), después
+    # perfectamente correlacionados (correlación ~1) -- simula el "la
+    # correlación se dispara en la crisis" que motiva esta función.
+    rng = np.random.default_rng(1)
+    idx = pd.date_range("2021-01-01", periods=200, freq="D", tz="UTC")
+    shared_shock = rng.normal(0.0, 0.03, 100)
+    a = pd.Series(np.concatenate([rng.normal(0.0, 0.02, 100), shared_shock]), index=idx)
+    b = pd.Series(np.concatenate([rng.normal(0.0, 0.02, 100), shared_shock]), index=idx)
+
+    rolling = rolling_pairwise_correlation(a, b, window=30)
+
+    early_corr = rolling.iloc[50]  # bien adentro del primer tramo (independiente)
+    late_corr = rolling.iloc[-1]  # bien adentro del segundo tramo (correlación perfecta)
+    assert late_corr == pytest.approx(1.0, abs=1e-6)
+    assert late_corr > early_corr + 0.5  # el salto tiene que ser grande, no ruido
+
+
+def test_rolling_pairwise_correlation_aligns_shorter_history_series() -> None:
+    idx_long = pd.date_range("2020-01-01", periods=50, freq="D", tz="UTC")
+    idx_short = pd.date_range("2020-01-15", periods=50, freq="D", tz="UTC")
+    a = pd.Series(np.arange(50, dtype=float), index=idx_long)
+    b = pd.Series(np.arange(50, dtype=float), index=idx_short)
+
+    rolling = rolling_pairwise_correlation(a, b, window=10)
+
+    # Solo hay 36 fechas comunes (2020-01-15..2020-02-19) -- la serie
+    # resultante tiene que respetar esa alineación, no la longitud original.
+    assert len(rolling) == 36
+
+
+def test_rolling_pairwise_correlation_empty_when_no_overlap() -> None:
+    idx_a = pd.date_range("2018-01-01", periods=10, freq="D", tz="UTC")
+    idx_b = pd.date_range("2022-01-01", periods=10, freq="D", tz="UTC")
+    a = pd.Series(np.arange(10, dtype=float), index=idx_a)
+    b = pd.Series(np.arange(10, dtype=float), index=idx_b)
+
+    rolling = rolling_pairwise_correlation(a, b, window=5)
+
+    assert rolling.empty

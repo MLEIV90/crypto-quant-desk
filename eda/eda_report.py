@@ -31,6 +31,7 @@ from statsmodels.graphics.tsaplots import plot_acf
 from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tsa.stattools import adfuller
 
+from analysis.comparison import align_common_dates
 from config import PERIODS_PER_YEAR
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,36 @@ def correlation_matrix(returns_dict: dict[str, pd.Series], method: str = "pearso
     """
     df = pd.DataFrame(returns_dict).dropna(how="any")
     return df.corr(method=method)
+
+
+DEFAULT_ROLLING_CORRELATION_WINDOW: int = 90
+
+
+def rolling_pairwise_correlation(
+    returns_a: pd.Series, returns_b: pd.Series, window: int = DEFAULT_ROLLING_CORRELATION_WINDOW
+) -> pd.Series:
+    """Correlación de Pearson en VENTANA MÓVIL entre dos series de retornos
+    (Fase 29) — a diferencia de `correlation_matrix` (una única foto
+    estática sobre todo el período), esto muestra CÓMO CAMBIÓ la
+    correlación en el tiempo.
+
+    El hallazgo más valioso de mirar correlación no es el número promedio,
+    sino que en las crisis las correlaciones entre criptoactivos tienden a
+    dispararse hacia 1 — justo cuando más se necesitaría diversificación,
+    desaparece — y eso solo se ve con una serie temporal, nunca con un
+    único número.
+
+    Reutiliza `analysis.comparison.align_common_dates` (mismo criterio de
+    alineación por fechas comunes que el resto del proyecto) y
+    `pd.Series.rolling(window).corr(other)` (Pearson, primitiva nativa de
+    pandas) — no reimplementa ningún cálculo de correlación. Los primeros
+    `window - 1` valores quedan en NaN (warmup). Devuelve una serie vacía
+    si las dos series no tienen ninguna fecha en común.
+    """
+    aligned = align_common_dates({"a": returns_a, "b": returns_b})
+    if aligned.empty:
+        return pd.Series(dtype=float)
+    return aligned["a"].rolling(window).corr(aligned["b"])
 
 
 # --------------------------------------------------------------------------

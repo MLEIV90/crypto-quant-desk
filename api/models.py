@@ -840,6 +840,37 @@ class CorrelationResponse(BaseModel):
     )
 
 
+class RollingCorrelationResponse(BaseModel):
+    """Respuesta de `GET /api/correlation/rolling` (Fase 29) — reutiliza
+    `eda.eda_report.rolling_pairwise_correlation` tal cual: correlación de
+    Pearson en ventana móvil entre DOS activos a lo largo del tiempo, a
+    diferencia de `CorrelationResponse` (una única foto estática sobre todo
+    el período de las 5 monedas a la vez).
+
+    `correlacion_actual`/`correlacion_promedio_historico` se calculan
+    SIEMPRE sobre TODA la historia común disponible entre `asset_a`/
+    `asset_b` (no sobre `fechas`/`correlacion`, que sí pueden venir
+    recortadas por `limit` para no mandar de más al gráfico) — así
+    "actual vs. promedio histórico" compara contra una base estable, sin
+    importar cuánta historia se esté graficando en ese momento.
+    """
+
+    asset_a: str
+    asset_b: str
+    interval: str
+    window: int = Field(description="Tamaño de la ventana móvil, en velas del intervalo elegido")
+    fechas: list[datetime] = Field(description="Fechas comunes a ambos activos, recortadas a 'limit'")
+    correlacion: list[float | None] = Field(
+        description="Correlación rolling en cada fecha de 'fechas' — null en el warmup (primeras window-1 fechas)"
+    )
+    correlacion_actual: float | None = Field(
+        description="Último valor no-nulo de la correlación rolling sobre TODA la historia común (no solo la recortada a 'limit')"
+    )
+    correlacion_promedio_historico: float | None = Field(
+        description="Promedio de la correlación rolling sobre TODA la historia común disponible — la base contra la que comparar 'correlacion_actual'"
+    )
+
+
 class AssetRiskComparison(BaseModel):
     """Métricas de riesgo/performance de UN activo (Fase 27), calculadas
     sobre la MISMA ventana que `CompareResponse.rendimiento_total_pct` (no

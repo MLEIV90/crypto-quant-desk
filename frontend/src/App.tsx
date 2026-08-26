@@ -107,7 +107,7 @@ function Dashboard() {
       {activeView === "estadistica" && <StatisticsView asset={asset} interval={interval} />}
       {activeView === "comparacion" && <ComparisonView assets={assets} interval={interval} />}
       {activeView === "arbitraje" && <ArbitrageView assets={assets} interval={interval} />}
-      {activeView === "correlacion" && <CorrelationView interval={interval} />}
+      {activeView === "correlacion" && <CorrelationView assets={assets} interval={interval} />}
     </div>
   );
 }

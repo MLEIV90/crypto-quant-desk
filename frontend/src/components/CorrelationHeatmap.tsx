@@ -35,12 +35,34 @@ function textColorFor({ r, g, b }: Rgb): string {
   return luminance > 140 ? "#111827" : "#f8fafc";
 }
 
+/** Fase 29 (mejora 4): par de activos a resaltar en la grilla (sin importar
+ * el orden fila/columna — el heatmap es simétrico, así que un par aparece
+ * en dos celdas). `kind` decide el color del borde.
+ */
+export interface HeatmapHighlight {
+  a: string;
+  b: string;
+  kind: "max" | "min";
+}
+
 interface CorrelationHeatmapProps {
   activos: string[];
   matriz: (number | null)[][];
+  highlights?: HeatmapHighlight[];
 }
 
-export function CorrelationHeatmap({ activos, matriz }: CorrelationHeatmapProps) {
+const HIGHLIGHT_BORDER_COLOR: Record<HeatmapHighlight["kind"], string> = {
+  max: "#facc15",
+  min: "#38bdf8",
+};
+
+export function CorrelationHeatmap({ activos, matriz, highlights = [] }: CorrelationHeatmapProps) {
+  function highlightFor(rowAsset: string, colAsset: string): HeatmapHighlight | undefined {
+    return highlights.find(
+      (h) => (h.a === rowAsset && h.b === colAsset) || (h.a === colAsset && h.b === rowAsset),
+    );
+  }
+
   return (
     <div
       className="correlation-heatmap"
@@ -67,12 +89,19 @@ export function CorrelationHeatmap({ activos, matriz }: CorrelationHeatmapProps)
               );
             }
             const bg = correlationColor(value);
+            const highlight = i !== j ? highlightFor(rowAsset, colAsset) : undefined;
             return (
               <div
                 key={colAsset}
                 className="correlation-heatmap__cell"
-                style={{ background: `rgb(${bg.r}, ${bg.g}, ${bg.b})`, color: textColorFor(bg) }}
-                title={`${rowAsset} vs ${colAsset}: ${value.toFixed(3)}`}
+                style={{
+                  background: `rgb(${bg.r}, ${bg.g}, ${bg.b})`,
+                  color: textColorFor(bg),
+                  boxShadow: highlight ? `inset 0 0 0 3px ${HIGHLIGHT_BORDER_COLOR[highlight.kind]}` : undefined,
+                }}
+                title={`${rowAsset} vs ${colAsset}: ${value.toFixed(3)}${
+                  highlight ? ` (${highlight.kind === "max" ? "par más" : "par menos"} correlacionado)` : ""
+                }`}
               >
                 {value.toFixed(2)}
               </div>

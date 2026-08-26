@@ -95,6 +95,7 @@ from api.models import (
     RiskSummaryResponse,
     RiskSummaryRow,
     RlResearchResult,
+    RollingCorrelationResponse,
     RotationResearchResult,
     SeasonalityBucket,
     StatsResponse,
@@ -106,7 +107,7 @@ from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
 from config import BASE_DIR, PERIODS_PER_YEAR, TARGET_VOL, TRANSACTION_COST_BPS, UNIVERSE, VOL_WINDOW
 from data.loaders import RESAMPLED_INTERVALS, get_prices
 from data.snapshot import GeoblockedError, last_closed_candle_open_time, update_snapshot
-from eda.eda_report import adf_test, correlation_matrix
+from eda.eda_report import DEFAULT_ROLLING_CORRELATION_WINDOW, adf_test, correlation_matrix, rolling_pairwise_correlation
 from metrics.risk_measures import (
     drawdown_series,
     expected_shortfall,
@@ -1634,6 +1635,60 @@ def get_correlation(
         fechas_n=fechas_n,
         activos=assets,
         matriz=matriz,
+    )
+
+
+@router.get(
+    "/correlation/rolling",
+    response_model=RollingCorrelationResponse,
+    summary="Correlación en ventana móvil entre DOS activos, a lo largo del tiempo",
+)
+def get_correlation_rolling(
+    asset_a: str,
+    asset_b: str,
+    interval: str = "1d",
+    window: int = Query(
+        DEFAULT_ROLLING_CORRELATION_WINDOW, gt=1, le=MAX_CANDLE_LIMIT, description="Ventana móvil, en velas del intervalo elegido"
+    ),
+    limit: int = Query(
+        MAX_CANDLE_LIMIT, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de fechas recientes a devolver para graficar"
+    ),
+) -> RollingCorrelationResponse:
+    """Reutiliza `eda.eda_report.rolling_pairwise_correlation` tal cual
+    (Fase 29) — a diferencia de `GET /api/correlation` (una foto estática de
+    las 5 monedas a la vez), esto muestra CÓMO CAMBIÓ en el tiempo la
+    correlación entre DOS activos elegidos, para poder ver que en las
+    crisis se dispara hacia 1 y la diversificación entre ellos desaparece.
+
+    `correlacion_actual`/`correlacion_promedio_historico` (ver docstring de
+    `RollingCorrelationResponse`) se calculan sobre TODA la historia común,
+    no sobre el recorte a `limit` que sí aplica a `fechas`/`correlacion` —
+    la base de comparación no debería moverse solo porque el usuario elige
+    ver menos historia en el gráfico.
+    """
+    _validate_interval(interval)
+    close_a = _load_df(asset_a, interval)["close"]
+    close_b = _load_df(asset_b, interval)["close"]
+    returns_a = simple_returns(close_a).dropna()
+    returns_b = simple_returns(close_b).dropna()
+
+    rolling = rolling_pairwise_correlation(returns_a, returns_b, window=window)
+    rolling_valid = rolling.dropna()
+
+    correlacion_actual = float(rolling_valid.iloc[-1]) if len(rolling_valid) > 0 else None
+    correlacion_promedio_historico = float(rolling_valid.mean()) if len(rolling_valid) > 0 else None
+
+    recent = rolling.tail(limit)
+
+    return RollingCorrelationResponse(
+        asset_a=asset_a,
+        asset_b=asset_b,
+        interval=interval,
+        window=window,
+        fechas=_dates_to_list(recent.index),
+        correlacion=_series_to_list(recent),
+        correlacion_actual=correlacion_actual,
+        correlacion_promedio_historico=correlacion_promedio_historico,
     )
 
 
