@@ -309,11 +309,30 @@ def rolling_value_at_risk(r: pd.Series, window: int, level: float = 0.95) -> pd.
     historia. Los primeros `window - 1` valores quedan en NaN (warmup, sin
     suficientes observaciones todavía para esa ventana).
 
-    USO EN LA API (Fase 20c): esta es la vía "VaR actual" para
-    `GET /api/risk-summary`, que a propósito NO ajusta un modelo GARCH por
-    activo (ver ese endpoint) — para `GET /api/risk`, que SÍ tiene un GARCH
-    ya ajustado, el VaR "actual" que refleja el régimen de hoy es
-    `models.garch.garch_var` (paramétrico, genuinamente del momento), no
-    esta versión por ventana móvil.
+    USO EN LA API (Fase 20c, unificado en Fase 25): esta es la vía "VaR
+    actual" tanto para `GET /api/risk-summary` COMO para `GET /api/risk` —
+    antes de Fase 25, `GET /api/risk` usaba en cambio `models.garch.garch_var`
+    (paramétrico, vía la volatilidad condicional GARCH), lo que daba un
+    número distinto al de esta función para el MISMO activo en el MISMO
+    momento, sin que el usuario tuviera forma de saber que eran dos métodos
+    distintos. Ver `rolling_expected_shortfall` para el ES equivalente.
     """
     return r.rolling(window).apply(lambda window_values: value_at_risk(pd.Series(window_values), level=level), raw=True)
+
+
+def rolling_expected_shortfall(r: pd.Series, window: int, level: float = 0.95) -> pd.Series:
+    """`expected_shortfall` (reutilizada tal cual) recalculada en ventana
+    móvil de `window` observaciones — el equivalente de `rolling_value_at_risk`
+    para el ES, misma convención (pérdida positiva, primeros `window - 1`
+    valores en NaN por warmup).
+
+    USO EN LA API (Fase 25): junto con `rolling_value_at_risk`, esta es la
+    vía "ES actual" de `GET /api/risk` — unificada con el método empírico
+    que ya usaba `GET /api/risk-summary` para VaR, en vez del ES paramétrico
+    implícito por GARCH que usaba antes (`models.garch.garch_expected_shortfall`),
+    que daba un número distinto al VaR/ES "actual" de la tabla de 5 monedas
+    para el mismo activo.
+    """
+    return r.rolling(window).apply(
+        lambda window_values: expected_shortfall(pd.Series(window_values), level=level), raw=True
+    )

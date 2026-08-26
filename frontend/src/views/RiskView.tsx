@@ -174,33 +174,34 @@ export function RiskView({ asset, onAssetChange }: RiskViewProps) {
             <InfoTooltip text={RISK_ACTUAL_VS_HISTORICO_HELP} />
           </h3>
           <p className="view-note">
-            El VaR/ES "actual" refleja el régimen de HOY (se mueve con la volatilidad condicional GARCH); el
-            "histórico" es un único número sobre toda la serie y NO cambia aunque el mercado esté en calma o en
-            tensión — mirá el actual para saber cuánto riesgo hay ahora.
+            El VaR/ES "actual" (empírico, último año) refleja el régimen de HOY — es el MISMO método y el mismo
+            número que la tabla de las 5 monedas de más arriba. El "histórico" es un único número sobre toda la
+            serie y NO cambia aunque el mercado esté en calma o en tensión — mirá el actual para saber cuánto
+            riesgo hay ahora.
           </p>
           <div className="metric-grid">
             <MetricCard
-              label="VaR 95% actual (hoy)"
+              label="VaR 95% actual (empírico, último año)"
               value={`${(risk.var95_actual * 100).toFixed(2)}%`}
               help={`${RISK_METRIC_HELP.var95} ${RISK_PERCENTILE_HELP} Base: ${risk.actual_basis}.`}
               subtext={percentileDescriptor(risk.percentiles.var95, risk.percentiles.base).text}
               subtextColor={percentileDescriptor(risk.percentiles.var95, risk.percentiles.base).color}
             />
             <MetricCard
-              label="ES 95% actual (hoy)"
+              label="ES 95% actual (empírico, último año)"
               value={`${(risk.es95_actual * 100).toFixed(2)}%`}
               help={`${RISK_METRIC_HELP.es95} ${RISK_PERCENTILE_HELP} Base: ${risk.actual_basis}.`}
               subtext={percentileDescriptor(risk.percentiles.es95, risk.percentiles.base).text}
               subtextColor={percentileDescriptor(risk.percentiles.es95, risk.percentiles.base).color}
             />
             <MetricCard
-              label="VaR 95% histórico"
+              label="VaR 95% histórico (toda la serie)"
               value={`${(risk.var95 * 100).toFixed(2)}%`}
               help={RISK_METRIC_HELP.var95}
               subtext={`referencia: ${risk.historico_basis} (no refleja el régimen actual)`}
             />
             <MetricCard
-              label="ES 95% histórico"
+              label="ES 95% histórico (toda la serie)"
               value={`${(risk.es95 * 100).toFixed(2)}%`}
               help={RISK_METRIC_HELP.es95}
               subtext={`referencia: ${risk.historico_basis} (no refleja el régimen actual)`}

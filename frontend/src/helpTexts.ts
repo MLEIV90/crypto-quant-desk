@@ -108,13 +108,14 @@ export const RISK_VOL_TARGETING_HELP =
   "esta sección le atribuía el resultado de la combinación al vol targeting solo, algo que no era cierto.";
 
 export const RISK_SUMMARY_HELP =
-  "Comparación de riesgo actual entre las 5 monedas — cuál está más volátil o en tensión hoy. El régimen y el " +
-  "VaR de esta tabla usan volatilidad REALIZADA y una ventana móvil (no el modelo GARCH que arma el resto de " +
-  "esta vista para el activo seleccionado): ajustar un GARCH para las 5 monedas a la vez sería demasiado " +
-  "lento para una tabla que se lee de un vistazo, así que acá se prioriza velocidad sobre precisión — el " +
-  "rótulo de cada columna aclara la base exacta, y puede diferir del régimen/VaR GARCH del panel de abajo sin " +
-  "que eso sea una contradicción: son dos métodos de medición distintos, no dos respuestas sobre lo mismo. " +
-  "Hacé clic en una fila para pasar a ver el detalle completo de esa moneda.";
+  "Comparación de riesgo actual entre las 5 monedas — cuál está más volátil o en tensión hoy. El VaR de esta " +
+  "tabla (Fase 25) es EMPÍRICO en ventana móvil de 1 año, el MISMO método y el MISMO número que el 'VaR 95% " +
+  "actual' del panel de abajo para el activo seleccionado — antes eran métodos distintos y podían mostrar " +
+  "números distintos para la misma moneda, ya no. El RÉGIMEN sí sigue siendo dos métodos a propósito: acá usa " +
+  "volatilidad REALIZADA (rápida, sin ajustar un GARCH por moneda) mientras el panel de abajo usa GARCH — " +
+  "ajustar 5 modelos GARCH a la vez sería demasiado lento para una tabla que se lee de un vistazo, así que " +
+  "puede diferir del régimen del panel de abajo sin que eso sea una contradicción: el rótulo de la columna " +
+  "aclara la base exacta. Hacé clic en una fila para pasar a ver el detalle completo de esa moneda.";
 
 // Fase 20c: coherencia del panel de riesgo — VaR/ES "actual" (GARCH, hoy)
 // vs. "histórico" (toda la serie), y bases de comparación explícitas.
@@ -122,10 +123,13 @@ export const RISK_SUMMARY_HELP =
 export const RISK_ACTUAL_VS_HISTORICO_HELP =
   "Antes, el VaR y el ES que se mostraban acá eran un único número calculado sobre TODA la historia del " +
   "activo — el mismo valor tanto en un día de calma como en uno de tensión, así que no servían para " +
-  "responder '¿cuánto riesgo hay HOY?'. El VaR/ES ACTUAL resuelve eso: se calcula con la volatilidad " +
-  "condicional GARCH de la vela de hoy, así que sube y baja junto con el régimen. El histórico se conserva " +
-  "como referencia de largo plazo (útil para comparar activos entre sí en un período largo), pero rotulado " +
-  "aparte para no confundirlo con 'el riesgo de hoy'.";
+  "responder '¿cuánto riesgo hay HOY?'. El VaR/ES ACTUAL resuelve eso: se calcula de forma EMPÍRICA sobre " +
+  "una ventana móvil del último año (el mismo método, sin GARCH, que ya usa la tabla de las 5 monedas de " +
+  "arriba — Fase 25, antes este panel usaba en cambio un método paramétrico vía GARCH que daba un número " +
+  "distinto al de esa tabla para la misma moneda), así que sube y baja junto con el régimen reciente. El " +
+  "histórico se conserva como referencia de largo plazo (útil para comparar activos entre sí en un período " +
+  "largo), pero rotulado aparte para no confundirlo con 'el riesgo de hoy'. La volatilidad condicional GARCH " +
+  "no se pierde: sigue mostrándose como métrica de volatilidad y régimen, más arriba.";
 
 export const SUGGESTER_HELP =
   "Es un VOTO de varios estudios técnicos (RSI, medias, MACD, estocástico, Bollinger, pivote) combinados por " +

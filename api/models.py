@@ -128,10 +128,10 @@ class RiskPercentiles(BaseModel):
     mostrar, por ejemplo, "TENSIÓN" junto a un percentil bajo sin ninguna
     explicación de por qué no contradecían: eran dos lentes distintos sin
     rotular. `var95`/`es95` acá corresponden a `RiskResponse.var95_actual`/
-    `es95_actual` (el GARCH-VaR/ES de HOY, ver esos campos) — NO a
-    `RiskResponse.var95`/`es95` (todo el historial), que al ser un único
-    número sobre toda la serie no tiene un "percentil de hoy" que tenga
-    sentido calcular.
+    `es95_actual` (el VaR/ES EMPÍRICO rolling de HOY, Fase 25 — ver esos
+    campos) — NO a `RiskResponse.var95`/`es95` (todo el historial), que al
+    ser un único número sobre toda la serie no tiene un "percentil de hoy"
+    que tenga sentido calcular.
     """
 
     vol_realizada: float | None
@@ -161,17 +161,31 @@ class RiskResponse(BaseModel):
     `app.workers.AnalysisWorker` para la pestaña "Riesgo" del cockpit,
     siempre en diario (el modelo GARCH del proyecto es diario).
 
-    COHERENCIA (Fase 20c, léase antes de tocar esto): `var95`/`es95` son
-    puntuales sobre TODA la serie histórica — NO se mueven con el régimen
-    actual (un activo en "tensión" y ese mismo activo en "calma" muestran
-    el MISMO número), así que no sirven para responder "¿cuánto riesgo hay
-    HOY?". Para eso están `var95_actual`/`es95_actual`: el VaR/ES
-    PARAMÉTRICO implícito por el modelo GARCH ya ajustado
-    (`models.garch.garch_var`/`garch_expected_shortfall`, usando la
-    volatilidad condicional de HOY) — es la magnitud que SÍ hay que mirar
+    COHERENCIA (Fase 20c, actualizado en Fase 25 — léase antes de tocar
+    esto): `var95`/`es95` son puntuales sobre TODA la serie histórica — NO
+    se mueven con el régimen actual (un activo en "tensión" y ese mismo
+    activo en "calma" muestran el MISMO número), así que no sirven para
+    responder "¿cuánto riesgo hay HOY?". Para eso están
+    `var95_actual`/`es95_actual`: VaR/ES EMPÍRICO recalculado en ventana
+    móvil de 1 año (`metrics.risk_measures.rolling_value_at_risk`/
+    `rolling_expected_shortfall`) — es la magnitud que SÍ hay que mirar
     para "riesgo actual", y la que muestra el frontend como titular.
     `var95`/`es95` quedan como referencia secundaria de largo plazo,
     rotulados explícitamente (`historico_basis`) para no confundirlos.
+
+    Fase 25 (unificación): antes de esta fase, `var95_actual`/`es95_actual`
+    acá eran el VaR/ES PARAMÉTRICO implícito por el modelo GARCH ya
+    ajustado (`models.garch.garch_var`/`garch_expected_shortfall`) — un
+    método DISTINTO al que ya usaba `RiskSummaryRow.var95` (empírico
+    rolling), así que un mismo activo mostraba dos números de "VaR actual"
+    distintos sin que el usuario supiera que eran dos métodos diferentes.
+    Ahora ambos endpoints usan el MISMO método empírico rolling, con la
+    MISMA etiqueta de base (`actual_basis` acá == `RiskSummaryRow.var95_basis`)
+    — para un mismo activo, `var95_actual` de acá == `var95` de la fila
+    correspondiente de `GET /api/risk-summary`. La volatilidad condicional
+    GARCH (`vol_garch`) NO se pierde: sigue siendo la métrica de
+    volatilidad que se muestra, y `regimen` sigue basándose en ella — solo
+    el VaR/ES "actual" dejó de ser paramétrico.
     """
 
     asset: str
@@ -183,10 +197,10 @@ class RiskResponse(BaseModel):
     var95: float = Field(description="VaR histórico al 95% sobre TODA la serie (pérdida positiva) — referencia de largo plazo, NO refleja el régimen actual")
     es95: float = Field(description="Expected Shortfall histórico al 95% sobre TODA la serie (pérdida positiva) — misma referencia que var95")
     var95_actual: float = Field(
-        description="VaR 95% implícito por GARCH con la volatilidad condicional de HOY (pérdida positiva) — SÍ refleja el régimen actual"
+        description="VaR 95% EMPÍRICO en ventana móvil de 1 año (pérdida positiva) — mismo método que RiskSummaryRow.var95, SÍ refleja el régimen actual"
     )
     es95_actual: float = Field(
-        description="Expected Shortfall 95% implícito por GARCH con la volatilidad condicional de HOY (pérdida positiva)"
+        description="Expected Shortfall 95% EMPÍRICO en ventana móvil de 1 año (pérdida positiva)"
     )
     historico_basis: str = Field(description="Rótulo legible de la base de var95/es95")
     actual_basis: str = Field(description="Rótulo legible de la base de var95_actual/es95_actual")
@@ -217,9 +231,12 @@ class RiskSummaryRow(BaseModel):
     métodos de medición distintos, no dos respuestas contradictorias sobre
     lo mismo. `var95` tampoco es el histórico de toda la serie (a
     diferencia de `RiskResponse.var95`): es un VaR "actual" recalculado en
-    ventana móvil de 1 año (`metrics.risk_measures.rolling_value_at_risk`),
-    la alternativa rápida (sin GARCH) al `var95_actual` paramétrico de
-    `GET /api/risk` — `var95_basis` lo rotula.
+    ventana móvil de 1 año (`metrics.risk_measures.rolling_value_at_risk`)
+    — desde Fase 25, el MISMO método (y la MISMA `var95_basis`) que usa
+    `RiskResponse.var95_actual`: antes de esa fase, `GET /api/risk` usaba
+    en cambio un VaR paramétrico implícito por GARCH, un método DISTINTO
+    que daba un número distinto para el mismo activo/momento sin rotularlo
+    — ver el docstring de `RiskResponse` para el detalle de la unificación.
     """
 
     asset: str

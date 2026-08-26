@@ -271,8 +271,9 @@ def test_get_risk_returns_expected_fields() -> None:
     assert body["es95"] >= body["var95"]  # Expected Shortfall siempre >= VaR (misma convención de pérdida positiva)
     assert "/" in body["modelo_garch"]
 
-    # Fase 20c: VaR/ES "actual" (GARCH, hoy) además del histórico (toda la
-    # serie) — misma relación ES >= VaR, y con rótulos de base no vacíos.
+    # Fase 20c (método actualizado en Fase 25): VaR/ES "actual" (empírico,
+    # ventana móvil de 1 año) además del histórico (toda la serie) — misma
+    # relación ES >= VaR, y con rótulos de base no vacíos.
     assert body["es95_actual"] >= body["var95_actual"]
     assert body["historico_basis"]
     assert body["actual_basis"]
@@ -300,11 +301,12 @@ def test_get_risk_returns_expected_fields() -> None:
 def test_get_risk_actual_var_differs_from_historico_when_regime_shifts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Fase 20c: caso conocido -- una serie con un tramo de vol BAJA seguido
-    # de un tramo de vol ALTA (justo antes de "hoy"). El VaR histórico
-    # (toda la serie) queda "promediado" entre ambos tramos, pero el VaR
-    # "actual" (GARCH, condicionado a la vela de hoy) debe reflejar el
-    # tramo de vol ALTA reciente -- por construcción, tienen que diferir.
+    # Fase 20c (método actualizado en Fase 25): caso conocido -- una serie
+    # con un tramo de vol BAJA seguido de un tramo de vol ALTA (justo antes
+    # de "hoy"). El VaR histórico (toda la serie) queda "promediado" entre
+    # ambos tramos, pero el VaR "actual" (empírico, ventana móvil de 1 año)
+    # debe reflejar el tramo de vol ALTA reciente -- por construcción,
+    # tienen que diferir.
     monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
     rng = np.random.default_rng(7)
     n_calm, n_stressed = 700, 60
@@ -336,6 +338,27 @@ def test_get_risk_unknown_asset_returns_404() -> None:
     response = client.get("/api/risk", params={"asset": "DOGE"})
 
     assert response.status_code == 404
+
+
+def test_get_risk_var95_actual_matches_risk_summary_for_same_asset() -> None:
+    # Fase 25: antes de esta fase, /api/risk usaba VaR paramétrico GARCH
+    # para "actual" mientras /api/risk-summary ya usaba VaR empírico
+    # rolling -- dos métodos distintos daban dos números distintos para el
+    # MISMO activo/momento. Ahora ambos usan el mismo método empírico: para
+    # un activo dado, el número (y el rótulo de base) tienen que coincidir
+    # EXACTAMENTE.
+    detalle = client.get("/api/risk", params={"asset": "BTC"}).json()
+    resumen = client.get("/api/risk-summary").json()
+    fila_btc = next(fila for fila in resumen["filas"] if fila["asset"] == "BTC")
+
+    assert detalle["var95_actual"] == pytest.approx(fila_btc["var95"])
+    assert detalle["actual_basis"] == fila_btc["var95_basis"]
+
+    # El VaR histórico sigue siendo un método DISTINTO (toda la serie, no
+    # ventana móvil) -- no debería coincidir con el actual ni tener la
+    # misma etiqueta de base.
+    assert detalle["var95"] != pytest.approx(detalle["var95_actual"])
+    assert detalle["historico_basis"] != detalle["actual_basis"]
 
 
 # --------------------------------------------------------------------------

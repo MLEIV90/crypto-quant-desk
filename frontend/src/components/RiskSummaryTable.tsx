@@ -36,7 +36,7 @@ export function RiskSummaryTable({ filas, activeAsset, onSelectAsset }: RiskSumm
             <th>Moneda</th>
             <th>Vol. realizada</th>
             <th>Régimen</th>
-            <th>VaR 95%</th>
+            <th>VaR 95% actual</th>
           </tr>
         </thead>
         <tbody>
