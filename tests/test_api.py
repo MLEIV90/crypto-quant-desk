@@ -960,6 +960,11 @@ def test_get_stats_daily_returns_expected_structure() -> None:
     assert len(body["estacionalidad_mensual"]) > 0
     assert set(body["estacionalidad_mensual"][0].keys()) == {"bucket", "retorno_medio", "mediana", "desvio", "n"}
     assert len(body["estacionalidad_semanal"]) > 0
+    assert set(body["estacionalidad_semanal"][0].keys()) == {"bucket", "retorno_medio", "mediana", "desvio", "n"}
+    # Fase 26: desvio ahora SÍ se calcula para estacionalidad semanal (antes
+    # era siempre None) — con años de historia diaria, cada día de la
+    # semana tiene de sobra más de una observación.
+    assert all(bucket["desvio"] is not None for bucket in body["estacionalidad_semanal"])
     # diario: sin estacionalidad horaria (todas las velas caerían en la hora 0).
     assert body["estacionalidad_horaria"] is None
 
@@ -1018,6 +1023,8 @@ def test_get_stats_hourly_includes_hourly_seasonality() -> None:
     assert len(body["estacionalidad_horaria"]) > 0
     horas = {bucket["bucket"] for bucket in body["estacionalidad_horaria"]}
     assert horas.issubset(set(range(24)))
+    # Fase 26: mismo agregado que la semanal.
+    assert set(body["estacionalidad_horaria"][0].keys()) == {"bucket", "retorno_medio", "mediana", "desvio", "n"}
 
 
 def test_get_stats_non_btc_asset_has_no_halvings() -> None:

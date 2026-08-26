@@ -213,6 +213,10 @@ export const SEASONALITY_HELP = {
     "A diferencia de las acciones, cripto opera los 7 días — no hay 'efecto fin de semana' por falta de " +
     "mercado abierto. Patrón débil e inestable, no una regla operable. La estacionalidad MENSUAL está más " +
     "abajo, en el mapa de calor mes x año — ahí se ve año por año, no como un promedio único.",
+  noiseCaveatIntro:
+    "Fase 26: que un día promedie más que otro NO significa que ese día 'convenga' — compará esa diferencia " +
+    "contra cuánto varía el retorno de un día cualquiera (el desvío estándar) para ver si hay una señal real " +
+    "o solo ruido.",
 };
 
 export const STATIONARITY_HELP =
@@ -222,15 +226,32 @@ export const STATIONARITY_HELP =
   "modela sobre RETORNOS, que sí suelen ser estacionarios (oscilan alrededor de una media estable). p-valor < " +
   "0.05 se lee como 'sí es estacionaria'.";
 
+export const STATIONARITY_PLAIN_HELP =
+  "En criollo: que el PRECIO no sea estacionario significa que deambula sin un nivel al que 'vuelva' — hoy " +
+  "puede estar en cualquier lado según toda la tendencia acumulada, así que su nivel actual no sirve como " +
+  "referencia para predecir nada. Que los RETORNOS sí lo sean significa que sus variaciones día a día tienen " +
+  "una estructura ESTABLE en el tiempo (una media y una dispersión que no se van a cualquier lado) — por eso " +
+  "todo el análisis serio de este proyecto (y en general) se hace sobre retornos, nunca sobre el precio crudo.";
+
 export const AUTOCORRELATION_HELP = {
   returns:
     "Autocorrelación del NIVEL de retorno, rezago a rezago: ¿el retorno de hace N velas ayuda a predecir el " +
     "de hoy? En un mercado razonablemente eficiente, estas barras deberían estar cerca de 0 — eso es lo " +
     "ESPERADO, no una falla del análisis.",
+  returnsPlain:
+    "¿Para qué sirve esto? Si estas barras estuvieran lejos de 0 de forma consistente, se podría usar el " +
+    "retorno de ayer (o de hace varios días) para tener una pista sobre el de hoy. Que estén pegadas a 0 en " +
+    "todos los rezagos CONFIRMA cuantitativamente lo que encontró el resto de la investigación del proyecto " +
+    "(ver la pestaña Research): la DIRECCIÓN del precio no se predice a partir de su propio pasado.",
   squared:
     "Autocorrelación de los retornos AL CUADRADO: mide si a un día volátil le sigue otro día volátil (aunque " +
     "el SIGNO del retorno no se pueda predecir). Positiva y persistente en los primeros rezagos es lo típico " +
     "en cripto — 'clustering de volatilidad', la motivación de modelar con GARCH (ver la vista Riesgo).",
+  squaredPlain:
+    "¿Para qué sirve esto? Que estas barras sean POSITIVAS y no caigan de golpe a 0 muestra que la " +
+    "volatilidad se agrupa: días agitados tienden a seguir a otros días agitados, y días tranquilos a otros " +
+    "tranquilos — aunque no se sepa hacia dónde va el precio. Esa es, en una frase, la base estadística de " +
+    "por qué el RIESGO sí se puede gestionar (vol targeting, GARCH) aunque la DIRECCIÓN no se pueda predecir.",
 };
 
 // Fase 15a: reemplaza al periodograma (CYCLES_HELP) — sobre retornos
@@ -239,16 +260,25 @@ export const AUTOCORRELATION_HELP = {
 // significado reconocible: drawdowns, fases bull/bear, y halvings.
 
 export const DRAWDOWN_HELP =
-  "Un drawdown es una caída desde un máximo histórico hasta el mínimo posterior, antes de volver a superar " +
-  "ese máximo. 'Profundidad' es cuánto cayó desde el pico; 'días de caída' cuánto tardó en llegar al fondo; " +
-  "'días de recuperación' cuánto tardó en volver a superar el pico anterior (vacío si todavía no recuperó). " +
-  "Es historia, no una garantía de que el próximo drawdown vaya a tener una forma parecida.";
+  "Un drawdown es una caída desde el MÁXIMO HISTÓRICO de toda la serie hasta el mínimo posterior, antes de " +
+  "volver a superar ese máximo. 'Profundidad' es cuánto cayó desde el pico; 'días de caída' cuánto tardó en " +
+  "llegar al fondo; 'días de recuperación' cuánto tardó en volver a superar el pico anterior (vacío si " +
+  "todavía no recuperó). Es historia, no una garantía de que el próximo drawdown vaya a tener una forma " +
+  "parecida.";
 
 export const MARKET_PHASES_HELP =
-  "Acá una fase pasa a ser BEAR en cuanto el precio cae 20% o más desde un máximo, y BULL en cuanto sube 20% " +
-  "o más desde un mínimo — una regla mecánica y arbitraria (el 20% es la convención que usan medios " +
-  "financieros, no un número mágico). Con otro umbral las fechas de cada fase cambiarían. La fase más " +
-  "reciente queda marcada 'en curso' porque todavía no se confirmó el próximo cruce de 20% en sentido opuesto.";
+  "Acá una fase pasa a ser BEAR en cuanto el precio cae 20% o más desde un máximo LOCAL (el techo de esa " +
+  "tendencia, no necesariamente el máximo histórico de toda la serie), y BULL en cuanto sube 20% o más desde " +
+  "un mínimo local — una regla mecánica y arbitraria (el 20% es la convención que usan medios financieros, " +
+  "no un número mágico). Con otro umbral las fechas de cada fase cambiarían. La fase más reciente queda " +
+  "marcada 'en curso' porque todavía no se confirmó el próximo cruce de 20% en sentido opuesto.";
+
+export const DRAWDOWN_VS_PHASES_NOTE =
+  "Fase 26: los números de esta tabla y los de Drawdowns (más arriba) pueden describir la MISMA caída y " +
+  "mostrar porcentajes distintos sin contradecirse — no es un error. El drawdown se mide siempre desde el " +
+  "MÁXIMO HISTÓRICO de toda la serie; una fase bajista se mide desde el techo de ESA tendencia puntual, que " +
+  "puede ser más bajo que el máximo histórico. Miden el mismo tramo del gráfico desde puntos de partida " +
+  "distintos.";
 
 export const HALVING_CYCLE_HELP =
   "El halving reduce a la mitad la recompensa por bloque de Bitcoin cada ~4 años (hecho conocido, no un " +
@@ -261,6 +291,13 @@ export const MONTHLY_HEATMAP_HELP =
   "los años en un solo número y esconde qué tan distinto fue cada año), acá se ve la estacionalidad REAL: " +
   "si un mes 'suele' ser positivo, pero con años muy dispares, el patrón es mucho más débil de lo que " +
   "sugeriría el promedio solo. Verde = mes positivo, rojo = negativo; casillero vacío = sin datos ese mes-año.";
+
+export const STATS_SYNTHESIS_TEXT =
+  "Todos estos análisis apuntan a lo mismo: la DIRECCIÓN del precio no muestra estructura predecible (el " +
+  "precio no es estacionario según ADF, la autocorrelación de retornos ronda 0, la estacionalidad semanal es " +
+  "ruido), pero la VOLATILIDAD y el RIESGO sí (clustering de volatilidad en la ACF de retornos², regímenes " +
+  "que se sostienen en el tiempo, drawdowns que se repiten con formas parecidas). Por eso esta herramienta se " +
+  "enfoca en gestionar riesgo (ver la pestaña Riesgo), no en predecir dirección.";
 
 // --------------------------------------------------------------------------
 // Vista "Comparación" (Fase 12a) — /api/compare

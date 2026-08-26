@@ -58,11 +58,23 @@ def test_weekday_seasonality_computes_correct_mean() -> None:
 
     out = weekday_seasonality(returns)
 
-    assert list(out.columns) == ["retorno_medio", "n"]
+    assert list(out.columns) == ["retorno_medio", "mediana", "desvio", "n"]
     assert out.index.name == "dia_semana"
     assert out.loc[0, "retorno_medio"] == pytest.approx(0.03)
     assert out.loc[0, "n"] == 2
     assert out.loc[1, "retorno_medio"] == pytest.approx(0.01)
+
+
+def test_weekday_seasonality_computes_desvio_and_leaves_it_nan_for_single_observation() -> None:
+    # Fase 26: desvio/mediana agregados para poder comparar el "ruido" (el
+    # desvío) contra la diferencia de medias entre días en el frontend.
+    idx = pd.to_datetime(["2021-01-04", "2021-01-11", "2021-01-05"], utc=True)
+    returns = pd.Series([0.02, 0.04, 0.01], index=idx)
+
+    out = weekday_seasonality(returns)
+
+    assert out.loc[0, "desvio"] == pytest.approx(returns.iloc[[0, 1]].std(ddof=1))
+    assert pd.isna(out.loc[1, "desvio"])  # martes: una sola observación
 
 
 # --------------------------------------------------------------------------
@@ -78,7 +90,7 @@ def test_hourly_seasonality_computes_correct_mean() -> None:
 
     out = hourly_seasonality(returns)
 
-    assert list(out.columns) == ["retorno_medio", "n"]
+    assert list(out.columns) == ["retorno_medio", "mediana", "desvio", "n"]
     assert out.index.name == "hora"
     assert out.loc[5, "retorno_medio"] == pytest.approx(0.02)
     assert out.loc[5, "n"] == 2

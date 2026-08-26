@@ -81,12 +81,25 @@ def weekday_seasonality(returns: pd.Series) -> pd.DataFrame:
     A diferencia de las acciones (que no operan fin de semana), cripto
     opera los 7 días — no hay un "hueco" de fin de semana sin datos.
 
-    Devuelve un DataFrame indexado 0-6, columnas ["retorno_medio", "n"].
+    Devuelve un DataFrame indexado 0-6, columnas ["retorno_medio", "mediana",
+    "desvio", "n"] (Fase 26: agrega mediana/desvio, antes solo tenía
+    retorno_medio/n — sin el desvío no había forma de decir si una
+    diferencia entre días es una señal real o ruido de muestreo, ver
+    `api/main.py::get_stats` y el frontend de la vista "Ciclos y
+    Estadística"). `desvio` puede ser NaN si un día tiene una sola
+    observación (desvío muestral con 1 dato no está definido).
     """
     r = returns.dropna()
     weekdays = r.index.dayofweek
     grouped = r.groupby(weekdays)
-    out = pd.DataFrame({"retorno_medio": grouped.mean(), "n": grouped.count()})
+    out = pd.DataFrame(
+        {
+            "retorno_medio": grouped.mean(),
+            "mediana": grouped.median(),
+            "desvio": grouped.std(ddof=1),
+            "n": grouped.count(),
+        }
+    )
     out.index.name = "dia_semana"
     return out
 
@@ -99,12 +112,21 @@ def hourly_seasonality(returns: pd.Series) -> pd.DataFrame:
     retornos horarios (ver `api/main.py::get_stats`, que solo la corre si
     `interval == "1h"`).
 
-    Devuelve un DataFrame indexado 0-23, columnas ["retorno_medio", "n"].
+    Devuelve un DataFrame indexado 0-23, columnas ["retorno_medio", "mediana",
+    "desvio", "n"] (Fase 26: agrega mediana/desvio, mismo motivo que
+    `weekday_seasonality`).
     """
     r = returns.dropna()
     hours = r.index.hour
     grouped = r.groupby(hours)
-    out = pd.DataFrame({"retorno_medio": grouped.mean(), "n": grouped.count()})
+    out = pd.DataFrame(
+        {
+            "retorno_medio": grouped.mean(),
+            "mediana": grouped.median(),
+            "desvio": grouped.std(ddof=1),
+            "n": grouped.count(),
+        }
+    )
     out.index.name = "hora"
     return out
 

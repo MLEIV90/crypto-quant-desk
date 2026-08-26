@@ -560,10 +560,11 @@ class DataStatusResponse(BaseModel):
 
 class SeasonalityBucket(BaseModel):
     """Una fila de `analysis.statistics.monthly_seasonality`/`weekday_seasonality`/
-    `hourly_seasonality` (Fase 11) — `bucket` es el mes (1-12), día de semana
-    (0=lunes..6=domingo) u hora UTC (0-23) según el campo de `StatsResponse`
-    que la contiene. `mediana`/`desvio` son `None` en estacionalidad semanal
-    y horaria (esas funciones no las calculan, ver su docstring).
+    `hourly_seasonality` (Fase 11, `mediana`/`desvio` en las tres desde Fase
+    26) — `bucket` es el mes (1-12), día de semana (0=lunes..6=domingo) u
+    hora UTC (0-23) según el campo de `StatsResponse` que la contiene.
+    `mediana`/`desvio` pueden ser `None` si ese bucket tiene una sola
+    observación (desvío muestral con 1 dato no está definido).
     """
 
     bucket: int

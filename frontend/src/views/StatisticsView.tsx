@@ -30,12 +30,15 @@ import { StatusMessage } from "../components/StatusMessage";
 import {
   AUTOCORRELATION_HELP,
   DRAWDOWN_HELP,
+  DRAWDOWN_VS_PHASES_NOTE,
   HALVING_CYCLE_HELP,
   MARKET_PHASES_HELP,
   MONTHLY_HEATMAP_HELP,
   SEASONALITY_HELP,
   STATIONARITY_HELP,
+  STATIONARITY_PLAIN_HELP,
   STATS_INTRO_HELP,
+  STATS_SYNTHESIS_TEXT,
 } from "../helpTexts";
 import { COLORS } from "../theme";
 import type { AutocorrelationPoint, SeasonalityBucket } from "../types";
@@ -74,6 +77,29 @@ function seasonalityToBarData(buckets: SeasonalityBucket[], labels?: Record<numb
         title: `${label}: ${formatDecimalPercent(b.retorno_medio)} (n=${b.n})`,
       };
     });
+}
+
+/** Fase 26: compara la diferencia entre el mejor y el peor "día promedio"
+ * contra el desvío estándar diario típico — para que el caveat de "esto es
+ * ruido" no sea una afirmación vaga, sino un número concreto que muestre
+ * cuántas veces más grande es la dispersión normal que la diferencia que
+ * se ve en el gráfico.
+ */
+function seasonalityNoiseNote(buckets: SeasonalityBucket[]): string | null {
+  if (buckets.length === 0) return null;
+  const retornos = buckets.map((b) => b.retorno_medio);
+  const rango = Math.max(...retornos) - Math.min(...retornos);
+  const desvios = buckets.map((b) => b.desvio ?? 0).filter((d) => d > 0);
+  if (desvios.length === 0 || rango <= 0) return null;
+  const desvioPromedio = desvios.reduce((sum, d) => sum + d, 0) / desvios.length;
+  const veces = desvioPromedio / rango;
+  return (
+    `La diferencia entre el mejor y el peor día promedio es de ${formatDecimalPercent(rango)}, pero el ` +
+    `desvío estándar diario típico ronda ${formatDecimalPercent(desvioPromedio)} — unas ${veces.toFixed(0)} ` +
+    `veces más grande que esa diferencia. Con un "ruido" tan superior a la "señal", nadie debería leer estos ` +
+    `datos como "el jueves conviene vender": es la firma estadística de una diferencia de medias que muy ` +
+    `probablemente sea puro azar de muestreo, no un patrón operable.`
+  );
 }
 
 function acfToBarData(points: AutocorrelationPoint[], field: "acf_retornos" | "acf_retornos2"): BarChartDatum[] {
@@ -129,6 +155,11 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
                 </div>
               )}
             </div>
+            <p className="view-note">{SEASONALITY_HELP.noiseCaveatIntro}</p>
+            {(() => {
+              const nota = seasonalityNoiseNote(stats.estacionalidad_semanal);
+              return nota ? <div className="honesty-banner">{nota}</div> : null;
+            })()}
           </div>
 
           {/* ESTACIONARIEDAD */}
@@ -146,6 +177,19 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
               />
               <MetricCard label="Retornos: p-valor" value={stats.adf_retornos.p_valor.toFixed(4)} />
             </div>
+            <p className="view-note">
+              En criollo: acá el precio de {asset} {stats.adf_precio.es_estacionaria ? "SÍ" : "NO"} es
+              estacionario (p={stats.adf_precio.p_valor.toFixed(4)}) — {stats.adf_precio.es_estacionaria
+                ? "vuelve hacia un nivel estable"
+                : "deambula sin volver a un nivel estable, su nivel actual no sirve como referencia para predecir nada"}
+              . Los retornos {stats.adf_retornos.es_estacionaria ? "SÍ" : "NO"} lo son (p=
+              {stats.adf_retornos.p_valor.toFixed(4)}) — {stats.adf_retornos.es_estacionaria
+                ? "sus variaciones día a día tienen una estructura estable en el tiempo"
+                : "tampoco tienen una estructura estable, un caso atípico para un activo financiero"}
+              . Por eso todo el análisis serio de este proyecto (y en general) se hace sobre retornos, nunca
+              sobre el precio crudo.
+              <InfoTooltip text={STATIONARITY_PLAIN_HELP} placement="bottom" />
+            </p>
           </div>
 
           {/* AUTOCORRELACIÓN */}
@@ -158,6 +202,7 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
               <div>
                 <p className="view-note">ACF de retornos (mercado eficiente ≈ cerca de 0)</p>
                 <BarChart data={acfToBarData(stats.autocorrelacion, "acf_retornos")} />
+                <p className="view-note">{AUTOCORRELATION_HELP.returnsPlain}</p>
               </div>
               <div>
                 <p className="view-note">
@@ -165,6 +210,7 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
                   <InfoTooltip text={AUTOCORRELATION_HELP.squared} placement="bottom" />
                 </p>
                 <BarChart data={acfToBarData(stats.autocorrelacion, "acf_retornos2")} />
+                <p className="view-note">{AUTOCORRELATION_HELP.squaredPlain}</p>
               </div>
             </div>
           </div>
@@ -222,6 +268,9 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
               Fases de mercado
               <InfoTooltip text={MARKET_PHASES_HELP} />
             </h3>
+            {stats.drawdowns.length > 0 && stats.fases_mercado.length > 0 && (
+              <p className="view-note">{DRAWDOWN_VS_PHASES_NOTE}</p>
+            )}
             {stats.fases_mercado.length === 0 ? (
               <p className="view-note">Ningún movimiento cruzó el umbral de 20% en el período disponible.</p>
             ) : (
@@ -312,6 +361,8 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
               </div>
             )}
           </div>
+
+          <div className="honesty-banner">{STATS_SYNTHESIS_TEXT}</div>
         </>
       )}
     </section>

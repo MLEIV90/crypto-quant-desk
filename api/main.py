@@ -421,11 +421,13 @@ def _halving_cycle_to_model(c: dict) -> HalvingCycle:
     )
 
 
-def _seasonality_to_buckets(df: pd.DataFrame, *, has_median_std: bool) -> list[SeasonalityBucket]:
+def _seasonality_to_buckets(df: pd.DataFrame) -> list[SeasonalityBucket]:
     """Convierte el DataFrame de `analysis.statistics.monthly_seasonality`/
     `weekday_seasonality`/`hourly_seasonality` a `list[SeasonalityBucket]`
-    (Fase 11) — `has_median_std` distingue `monthly_seasonality` (trae
-    "mediana"/"desvio") de las otras dos (no las calculan).
+    (Fase 11, simplificado en Fase 26: las tres funciones calculan
+    "mediana"/"desvio" desde Fase 26 — antes solo `monthly_seasonality` lo
+    hacía, y esta función tenía un parámetro `has_median_std` para
+    distinguirlas).
     """
     buckets = []
     for bucket, row in df.iterrows():
@@ -433,8 +435,8 @@ def _seasonality_to_buckets(df: pd.DataFrame, *, has_median_std: bool) -> list[S
             SeasonalityBucket(
                 bucket=int(bucket),
                 retorno_medio=float(row["retorno_medio"]),
-                mediana=_none_if_nan(row["mediana"]) if has_median_std else None,
-                desvio=_none_if_nan(row["desvio"]) if has_median_std else None,
+                mediana=_none_if_nan(row["mediana"]),
+                desvio=_none_if_nan(row["desvio"]),
                 n=int(row["n"]),
             )
         )
@@ -1300,13 +1302,9 @@ def get_stats(asset: str, interval: str = "1d") -> StatsResponse:
     close = df["close"]
     returns = simple_returns(close).dropna()
 
-    monthly = _seasonality_to_buckets(monthly_seasonality(returns), has_median_std=True)
-    weekly = _seasonality_to_buckets(weekday_seasonality(returns), has_median_std=False)
-    hourly = (
-        _seasonality_to_buckets(hourly_seasonality(returns), has_median_std=False)
-        if interval == "1h"
-        else None
-    )
+    monthly = _seasonality_to_buckets(monthly_seasonality(returns))
+    weekly = _seasonality_to_buckets(weekday_seasonality(returns))
+    hourly = _seasonality_to_buckets(hourly_seasonality(returns)) if interval == "1h" else None
 
     acf_df = autocorrelation(returns)
     autocorrelacion = [
