@@ -1496,6 +1496,55 @@
   background: var(--color-danger);
 }
 
+/* ---------------------------------------------------------------------
+   Celda con barra de umbral (Fase 28, screening de pares): qué tan lejos
+   está cada par del 60% requerido para considerarse operable.
+   --------------------------------------------------------------------- */
+
+.pair-threshold-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 140px;
+}
+
+.pair-threshold-cell__label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pair-threshold-cell__target {
+  color: var(--color-text-faint);
+}
+
+.pair-threshold-cell__track {
+  position: relative;
+  height: 8px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  overflow: visible;
+}
+
+.pair-threshold-cell__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  min-width: 2px;
+}
+
+.pair-threshold-cell__threshold-marker {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--color-text-faint);
+}
+
 .zscore-indicator {
   display: flex;
   flex-direction: column;

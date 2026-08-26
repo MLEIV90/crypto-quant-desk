@@ -33,9 +33,13 @@ import {
   ARBITRAGE_PAIR_BACKTEST_FLAT_PERIODS_NOTE,
   ARBITRAGE_PAIR_BACKTEST_HELP,
   ARBITRAGE_PAIR_BACKTEST_NOT_OPERABLE_WARNING,
+  ARBITRAGE_PURPOSE_HEADER,
   ARBITRAGE_SCATTER_HELP,
+  ARBITRAGE_SCATTER_NOISE_NOTE,
   ARBITRAGE_SCREENING_HELP,
+  ARBITRAGE_ZSCORE_ACTIONABLE_TEXT,
   ARBITRAGE_ZSCORE_EXTREMES_HELP,
+  ARBITRAGE_ZSCORE_NOT_ACTIONABLE_TEXT,
 } from "../helpTexts";
 import { COLORS } from "../theme";
 
@@ -44,6 +48,24 @@ const SCREENING_INTERVAL = "1d";
 // disponible) — se pide el mismo volumen para el scatter, así los puntos
 // son EXACTAMENTE los que ajustaron la recta de regresión (beta/alpha).
 const SCATTER_CANDLE_LIMIT = 60_000;
+
+// Fase 28: umbrales usados para colorear/anotar las métricas del detalle de
+// un par — los mismos números que ya describen ARBITRAGE_SCREENING_HELP/
+// ARBITRAGE_NOT_OPERABLE_WARNING (60% de ventanas estables) y la
+// convención estándar de significancia estadística (p<0.05), más un
+// umbral de "vida media útil" (días a pocas semanas) para que half-life
+// deje de mostrarse como un número neutro sin interpretación.
+const PAIR_ADF_SIGNIFICANCE = 0.05;
+const PAIR_STABILITY_THRESHOLD = 0.6;
+const PAIR_HALF_LIFE_MAX_USEFUL_DAYS = 30;
+
+/** `half_life_dias` viene en la unidad NATIVA del intervalo (días si es
+ * diario, horas si es horario, ver `pairs.cointegration.half_life`) — para
+ * comparar contra un umbral pensado en días hace falta convertir primero.
+ */
+function halfLifeInDays(value: number, interval: string): number {
+  return interval === "1h" ? value / 24 : value;
+}
 
 const ZSCORE_REFERENCE_LINES: ReferenceLineSpec[] = [
   { price: 2, label: "+2", color: COLORS.danger },
@@ -181,6 +203,7 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
 
   return (
     <section className="view">
+      <div className="honesty-banner">{ARBITRAGE_PURPOSE_HEADER}</div>
       <p className="view-note">{ARBITRAGE_INTRO_HELP}</p>
 
       <h3 className="panel-subtitle">
@@ -213,7 +236,26 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
                 <tr key={fila.par}>
                   <td>{fila.par}</td>
                   <td>{fila.direccion}</td>
-                  <td>{formatPercent(fila.fraccion_cointegrada)}</td>
+                  <td>
+                    <div className="pair-threshold-cell">
+                      <span className="pair-threshold-cell__label">
+                        <span style={{ color: fila.estable ? COLORS.success : COLORS.danger }}>
+                          {formatPercent(fila.fraccion_cointegrada)}
+                        </span>
+                        <span className="pair-threshold-cell__target">necesita 60%</span>
+                      </span>
+                      <div className="pair-threshold-cell__track">
+                        <div
+                          className="pair-threshold-cell__fill"
+                          style={{
+                            width: `${Math.min(100, fila.fraccion_cointegrada * 100)}%`,
+                            background: fila.estable ? COLORS.success : COLORS.danger,
+                          }}
+                        />
+                        <div className="pair-threshold-cell__threshold-marker" style={{ left: "60%" }} />
+                      </div>
+                    </div>
+                  </td>
                   <td>
                     {fila.beta_medio.toFixed(3)} ± {fila.beta_std.toFixed(3)}
                   </td>
@@ -275,16 +317,60 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
             <MetricCard
               label="p-valor ADF"
               value={detail.p_valor_adf.toFixed(4)}
+              valueColor={detail.p_valor_adf < PAIR_ADF_SIGNIFICANCE ? COLORS.success : COLORS.danger}
+              help={ARBITRAGE_CONCEPTS_HELP.cointegracion}
+              subtext={
+                detail.p_valor_adf < PAIR_ADF_SIGNIFICANCE
+                  ? "< 0.05: indica cointegración (in-sample)"
+                  : "necesita < 0.05 para indicar cointegración"
+              }
+              subtextColor={detail.p_valor_adf < PAIR_ADF_SIGNIFICANCE ? undefined : COLORS.danger}
             />
             <MetricCard
               label="Half-life"
               value={formatHalfLife(detail.half_life_dias, detail.interval)}
               help={ARBITRAGE_CONCEPTS_HELP.halfLife}
+              valueColor={
+                detail.half_life_dias === null || halfLifeInDays(detail.half_life_dias, detail.interval) > PAIR_HALF_LIFE_MAX_USEFUL_DAYS
+                  ? COLORS.danger
+                  : COLORS.success
+              }
+              subtext={
+                detail.half_life_dias === null
+                  ? "no revierte — sin vida media válida"
+                  : halfLifeInDays(detail.half_life_dias, detail.interval) > PAIR_HALF_LIFE_MAX_USEFUL_DAYS
+                    ? "en la práctica no revierte de forma operable (útil: días a pocas semanas)"
+                    : "dentro del rango útil (días a pocas semanas)"
+              }
+              subtextColor={
+                detail.half_life_dias === null || halfLifeInDays(detail.half_life_dias, detail.interval) > PAIR_HALF_LIFE_MAX_USEFUL_DAYS
+                  ? COLORS.danger
+                  : undefined
+              }
             />
             <MetricCard
               label="% ventanas estables"
               value={detail.estabilidad ? formatPercent(detail.estabilidad.fraccion_cointegrada) : "Sin dato"}
               help={ARBITRAGE_CONCEPTS_HELP.estabilidad}
+              valueColor={
+                detail.estabilidad
+                  ? detail.estabilidad.fraccion_cointegrada >= PAIR_STABILITY_THRESHOLD
+                    ? COLORS.success
+                    : COLORS.danger
+                  : undefined
+              }
+              subtext={
+                detail.estabilidad
+                  ? detail.estabilidad.fraccion_cointegrada >= PAIR_STABILITY_THRESHOLD
+                    ? "≥ 60%: cumple el umbral de operable"
+                    : "necesita ≥ 60% para considerarse operable"
+                  : undefined
+              }
+              subtextColor={
+                detail.estabilidad && detail.estabilidad.fraccion_cointegrada < PAIR_STABILITY_THRESHOLD
+                  ? COLORS.danger
+                  : undefined
+              }
             />
             <MetricCard
               label="Veredicto"
@@ -309,6 +395,7 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
             </span>
             <span className="zscore-indicator__interpretation">{detail.zscore_interpretacion}</span>
           </div>
+          <p className="view-note">{noEstable ? ARBITRAGE_ZSCORE_NOT_ACTIONABLE_TEXT : ARBITRAGE_ZSCORE_ACTIONABLE_TEXT}</p>
 
           <h3 className="panel-subtitle">
             Spread (z-score) con bandas ±2 / 0
@@ -329,6 +416,7 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
             Dispersión y recta de regresión
             <InfoTooltip text={ARBITRAGE_SCATTER_HELP} />
           </h3>
+          <p className="view-note">{ARBITRAGE_SCATTER_NOISE_NOTE}</p>
           {ohlcvYQuery.isLoading || ohlcvXQuery.isLoading ? (
             <StatusMessage kind="loading">Cargando precios para el scatter…</StatusMessage>
           ) : (

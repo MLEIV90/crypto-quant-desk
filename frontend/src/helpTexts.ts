@@ -339,6 +339,13 @@ export const COMPARISON_RANKING_HELP =
 // cointegrados — esta vista muestra ese resultado tal cual, sin maquillar.
 // --------------------------------------------------------------------------
 
+export const ARBITRAGE_PURPOSE_HEADER =
+  "Esta sección aplica arbitraje estadístico (pairs trading) con rigor a las 5 monedas del proyecto. Su " +
+  "resultado es NEGATIVO: ningún par es operable de forma confiable. Mostramos el análisis completo no para " +
+  "encontrar oportunidades, sino para DESCARTARLAS con evidencia — porque descartar una estrategia con " +
+  "rigor es tan valioso como encontrar una que funcione. Es la misma honestidad que rige toda la " +
+  "herramienta (ver también la pestaña Research).";
+
 export const ARBITRAGE_INTRO_HELP =
   "Esto es arbitraje ESTADÍSTICO ('pairs trading'), no arbitraje entre exchanges: no se compra y vende el " +
   "mismo activo en dos mercados, se busca un PAR de monedas cuyos precios se mueven juntos de forma estable, " +
@@ -427,6 +434,22 @@ export const ARBITRAGE_SCATTER_HELP =
   "la recta de regresión (beta, la misma que arma el spread) — si los puntos están bien pegados a la línea, " +
   "la relación lineal entre las dos monedas es fuerte; si están dispersos y desparramados, es débil, aunque " +
   "el spread pueda parecer razonable en otras métricas.";
+
+export const ARBITRAGE_SCATTER_NOISE_NOTE =
+  "Cada punto es un día (precio de una moneda vs. la otra, en log). Que la nube siga la recta significa que " +
+  "se mueven juntas; pero la DISPERSIÓN alrededor de la recta (lo 'gorda' que es la nube) es el ruido que " +
+  "hace que el spread no revierta de forma confiable — por eso un par puede moverse junto la mayor parte del " +
+  "tiempo y aun así no ser operable.";
+
+export const ARBITRAGE_ZSCORE_NOT_ACTIONABLE_TEXT =
+  "Un z-score extremo (>2 o <-2) sería una señal de entrada SI este par estuviera establemente cointegrado. " +
+  "Como NO lo está (menos del 60% de las ventanas móviles lo confirman), este z-score NO es accionable — es " +
+  "solo dónde está el spread ahora mismo, sin ninguna garantía de que vaya a volver hacia su media.";
+
+export const ARBITRAGE_ZSCORE_ACTIONABLE_TEXT =
+  "Este par SÍ está establemente cointegrado, así que un z-score extremo (>2 o <-2) acá tiene una base " +
+  "estadística real como señal de entrada — mirá el backtest de más abajo para ver cómo se comportó esa " +
+  "señal en la práctica, con costos incluidos.";
 
 export const ARBITRAGE_PAIR_BACKTEST_HELP =
   "Simula la estrategia de reversión sobre ESTE par: entra corto-spread si el z-score sube por encima del " +
