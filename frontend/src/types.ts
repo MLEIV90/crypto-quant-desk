@@ -375,10 +375,14 @@ export interface PairBacktestMetrics {
   turnover_medio_diario: number;
   n_trades: number;
   exposicion_media: number;
+  pct_tiempo_fuera: number;
   hit_rate: number;
 }
 
+export type PairBacktestMode = "long_short" | "long_only";
+
 export interface PairBacktestResult {
+  modo: PairBacktestMode;
   fechas: string[];
   equity_curve: number[];
   metrics: PairBacktestMetrics;
@@ -395,7 +399,13 @@ export interface PairDetailResponse {
   es_cointegrado: boolean;
   half_life_dias: number | null;
   fechas: string[];
+  ratio: (number | null)[];
   spread: (number | null)[];
+  banda_media: (number | null)[];
+  banda_superior: (number | null)[];
+  banda_inferior: (number | null)[];
+  kalman_beta: (number | null)[];
+  kalman_alpha: (number | null)[];
   zscore: (number | null)[];
   zscore_actual: number | null;
   zscore_interpretacion: string;

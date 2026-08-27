@@ -446,11 +446,20 @@ export const CORRELATION_METHOD_HELP =
   "no asume que la relación sea una línea recta — con series muy volátiles puede dar un número algo " +
   "distinto a Pearson sobre los mismos datos, ninguno de los dos es 'el correcto' de forma universal.";
 
-export const ARBITRAGE_NOT_OPERABLE_WARNING =
-  "Este par NO está establemente cointegrado (menos del 60% de las ventanas móviles lo confirman). El " +
-  "z-score de abajo puede igual mostrarse 'extremo' en este momento, pero sin cointegración estable ESO NO " +
-  "ES UNA SEÑAL CONFIABLE: no hay garantía estadística de que el spread vaya a revertir. Tratá este análisis " +
-  "como una exploración, no como una recomendación para operar.";
+/** Fase 30: el umbral de estabilidad (antes fijo en 60%) ahora lo elige el
+ * usuario con un slider — estos textos toman el número REAL elegido en vez
+ * de un "60%" hardcodeado, para no mentir sobre qué criterio se está
+ * aplicando en este momento.
+ */
+export function arbitrageNotOperableWarning(thresholdPct: number): string {
+  return (
+    `Este par NO está establemente cointegrado según TU criterio (menos del ${thresholdPct}% de las ventanas ` +
+    "móviles lo confirman — ajustá el umbral abajo si querés ser más o menos exigente). El z-score de abajo " +
+    "puede igual mostrarse 'extremo' en este momento, pero sin cointegración estable ESO NO ES UNA SEÑAL " +
+    "CONFIABLE: no hay garantía estadística de que el spread vaya a revertir. Tratá este análisis como una " +
+    "exploración, no como una recomendación para operar."
+  );
+}
 
 // Fase 15b: scatter + regresión, y backtest de la estrategia sobre el spread.
 
@@ -471,22 +480,28 @@ export const ARBITRAGE_SCATTER_NOISE_NOTE =
   "hace que el spread no revierta de forma confiable — por eso un par puede moverse junto la mayor parte del " +
   "tiempo y aun así no ser operable.";
 
-export const ARBITRAGE_ZSCORE_NOT_ACTIONABLE_TEXT =
-  "Un z-score extremo (>2 o <-2) sería una señal de entrada SI este par estuviera establemente cointegrado. " +
-  "Como NO lo está (menos del 60% de las ventanas móviles lo confirman), este z-score NO es accionable — es " +
-  "solo dónde está el spread ahora mismo, sin ninguna garantía de que vaya a volver hacia su media.";
+export function arbitrageZscoreNotActionableText(thresholdPct: number): string {
+  return (
+    "Un z-score extremo (entrada) sería una señal SI este par estuviera establemente cointegrado. Como NO lo " +
+    `está según TU criterio (menos del ${thresholdPct}% de las ventanas móviles lo confirman), este z-score NO ` +
+    "es accionable — es solo dónde está el spread ahora mismo, sin ninguna garantía de que vaya a volver " +
+    "hacia su media."
+  );
+}
 
-export const ARBITRAGE_ZSCORE_ACTIONABLE_TEXT =
-  "Este par SÍ está establemente cointegrado, así que un z-score extremo (>2 o <-2) acá tiene una base " +
-  "estadística real como señal de entrada — mirá el backtest de más abajo para ver cómo se comportó esa " +
-  "señal en la práctica, con costos incluidos.";
+export function arbitrageZscoreActionableText(thresholdPct: number): string {
+  return (
+    `Este par SÍ está establemente cointegrado (≥ ${thresholdPct}% de las ventanas, tu criterio actual), así ` +
+    "que un z-score extremo acá tiene una base estadística real como señal de entrada — mirá el backtest de " +
+    "más abajo para ver cómo se comportó esa señal en la práctica, con costos incluidos."
+  );
+}
 
 export const ARBITRAGE_PAIR_BACKTEST_HELP =
-  "Simula la estrategia de reversión sobre ESTE par: entra corto-spread si el z-score sube por encima del " +
-  "umbral de entrada, largo-spread si baja por debajo, cierra cuando vuelve cerca de la media, y corta la " +
-  "pérdida (stop) si se sigue alejando. Dollar-neutral, rebalanceado a diario, con costos de transacción — " +
-  "ver el detalle de los supuestos en el backend (pairs/backtest.py). Es un backtest, no un simulador de lo " +
-  "que pasaría operando en vivo.";
+  "Simula la estrategia de reversión sobre ESTE par con LOS UMBRALES QUE ELIJAS abajo: entra cuando el " +
+  "z-score cruza el umbral de entrada, cierra cuando vuelve cerca de la media (umbral de salida), y corta la " +
+  "pérdida (stop) si se sigue alejando. Con costos de transacción incluidos — ver el detalle de los supuestos " +
+  "en el backend (pairs/backtest.py). Es un backtest, no un simulador de lo que pasaría operando en vivo.";
 
 export const ARBITRAGE_PAIR_BACKTEST_NOT_OPERABLE_WARNING =
   "Este backtest corre la estrategia igual, mecánicamente, sin importar si el par es operable o no — y eso " +
@@ -498,6 +513,54 @@ export const ARBITRAGE_PAIR_BACKTEST_FLAT_PERIODS_NOTE =
   "Los tramos planos en la curva de equity son períodos SIN operaciones (el z-score del spread no cruzó los " +
   "umbrales de entrada/salida) — es el comportamiento correcto de la estrategia, no un cuelgue ni un error de " +
   "datos: mientras el spread se mueve cerca de su media, no hay señal para entrar.";
+
+// --------------------------------------------------------------------------
+// Fase 30: panel de pares profesional — ratio/spread en el tiempo, bandas,
+// hedge ratio dinámico (Kalman), z-score con zonas configurables, umbral de
+// estabilidad ajustable y backtest long-only vs. long-short.
+// --------------------------------------------------------------------------
+
+export const ARBITRAGE_RATIO_HELP =
+  "El 'ratio' es simplemente precio de Y dividido precio de X — cuántas unidades de X hacen falta para " +
+  "comprar una unidad de Y, como un tipo de cambio entre las dos monedas. Verlo en el TIEMPO (en vez de un " +
+  "único número) muestra si esa relación se mantuvo estable o cambió de régimen — algo que ninguna foto " +
+  "estática (el p-valor de cointegración, el beta) puede mostrar por sí sola. El 'spread log' (la otra opción " +
+  "del selector) es log(Y) menos beta veces log(X): la misma idea, pero en la escala que realmente usa el " +
+  "test de cointegración y el z-score de más abajo.";
+
+export const ARBITRAGE_BANDS_HELP =
+  "La línea central es la media MÓVIL del spread (no la media de toda la historia) — se adapta si el nivel de " +
+  "equilibrio del par cambió con el tiempo. Las bandas son esa media ± N desvíos estándar móviles (N " +
+  "configurable, 2 por defecto): cuando el spread sale de las bandas, está en una zona estadísticamente " +
+  "'extrema' respecto de su comportamiento RECIENTE (no de toda la historia) — los puntos marcados en el " +
+  "gráfico son justamente esos momentos.";
+
+export const ARBITRAGE_KALMAN_HELP =
+  "El 'beta' de la tarjeta de arriba es UN SOLO número, estimado sobre toda la muestra a la vez (regresión " +
+  "OLS). Este filtro de Kalman en cambio re-estima el hedge ratio DÍA A DÍA, dejando que se adapte si la " +
+  "relación entre las dos monedas cambió de régimen en algún momento — útil para ver si " +
+  "'la mejor forma de armar el spread' fue siempre la misma o cambió con el tiempo. No es una recomendación " +
+  "de qué beta usar para operar: es una forma más de mirar la estabilidad de la relación.";
+
+export const ARBITRAGE_ZSCORE_ZONES_HELP =
+  "Las líneas marcan los umbrales que elegiste abajo: 'entrada' (z-score por encima o por debajo de ese " +
+  "valor) es donde la estrategia abriría una posición; 'salida' es dónde la cerraría por reversión normal. " +
+  "Estos son los MISMOS umbrales que usa el backtest de más abajo — así lo que ves acá es exactamente la " +
+  "señal que se está simulando, no una referencia visual desconectada del resultado.";
+
+export const ARBITRAGE_STABILITY_THRESHOLD_HELP =
+  "Qué fracción de las ventanas móviles de ~1 año necesita seguir cointegrada para considerar el par " +
+  "'operable'. No hay un número 'correcto' — 60% es una convención razonable pero arbitraria. Subí el umbral " +
+  "para ser más exigente (menos pares pasan el filtro) o bajalo para ser más permisivo — el veredicto de " +
+  "abajo se recalcula con el número que elijas, no con uno fijo escondido en el backend.";
+
+export const ARBITRAGE_LONG_ONLY_HELP =
+  "LONG-SHORT (clásico): dollar-neutral — largo $1 de Y y corto beta dólares de X a la vez, apostando pura y " +
+  "exclusivamente a que el SPREAD revierta, sin importar hacia dónde vaya el mercado en general. LONG-ONLY " +
+  "(rotación): sin ir nunca en corto, rota el 100% del capital hacia la moneda que la señal indica más barata " +
+  "relativa a la otra (o se queda en cash sin señal) — más realista para quien no puede o no quiere operar " +
+  "en corto, pero deja de ser dollar-neutral: el resultado ahora también depende de si el mercado en general " +
+  "sube o baja, no solo de si el spread revierte.";
 
 // --------------------------------------------------------------------------
 // Vista "Research" (Fase 8c, rehecha en Fase 24) — /api/prediction (ML

@@ -1,63 +1,91 @@
 /**
- * Vista "Arbitraje" (Fase 12b, completada en Fase 15b) — consume
- * `/api/pairs/screening` y `/api/pairs/detail` (sobre
- * `pairs.cointegration`/`pairs.stability`/`pairs.signals`/`pairs.backtest`,
- * reutilizados tal cual, ver `api/main.py`), más `/api/ohlcv` (Fase 8a,
- * reutilizado) para el scatter.
+ * Vista "Arbitraje" (Fase 12b, completada en Fase 15b, rehecha como PANEL
+ * DE PARES en Fase 30) — consume `/api/pairs/screening` y
+ * `/api/pairs/detail` (sobre `pairs.cointegration`/`pairs.kalman_hedge`/
+ * `pairs.stability`/`pairs.signals`/`pairs.backtest`, reutilizados tal
+ * cual, ver `api/main.py`), `/api/correlation` (Fase 13b, reutilizado para
+ * la correlación actual del par) y `/api/ohlcv` (Fase 8a, reutilizado)
+ * para el scatter.
  *
  * ENCUADRE HONESTO: esto es arbitraje ESTADÍSTICO (pairs trading), NO
  * arbitraje entre exchanges — ver `ARBITRAGE_INTRO_HELP`. La Fase 2 de este
  * proyecto ya mostró que la mayoría de los pares de `config.UNIVERSE` NO
  * están establemente cointegrados; esta vista expone ese resultado tal
- * cual, con su veredicto rojo/verde, en vez de esconderlo. El backtest del
- * par (Fase 15b) lo CONFIRMA cuantitativamente en vez de solo describirlo.
+ * cual, con los NÚMEROS CRUDOS y el CRITERIO EN MANOS DEL USUARIO (Fase
+ * 30): nada de umbrales fijos decididos por defecto sin poder cambiarlos —
+ * los umbrales de entrada/salida/stop del backtest, el umbral de
+ * estabilidad y el ancho de las bandas del spread son todos configurables
+ * acá mismo, y el veredicto se recalcula con el criterio que el usuario
+ * elija, no con uno escondido en el backend.
  *
  * El screening (tabla de arriba) siempre es DIARIO — `pairs.stability.screen_pairs_stability`
  * no soporta otro intervalo (ver `api/main.py::get_pairs_screening`) — así
- * que ahí no se usa el `interval` compartido del header. El detalle de un
- * par (spread/z-score/scatter/backtest) sí lo respeta de verdad.
+ * que ahí no se usa el `interval` compartido del header, y su umbral de
+ * operable queda fijo en 60% (es un ranking de referencia rápida, no el
+ * panel de un par). El panel de un par SÍ respeta `interval` y todos los
+ * criterios configurables de Fase 30.
  */
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, getOhlcv, getPairsDetail, getPairsScreening } from "../api";
+import { ApiError, getCorrelation, getOhlcv, getPairsDetail, getPairsScreening } from "../api";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { LineChartPanel, type LineSeriesMarkerSpec, type ReferenceLineSpec } from "../components/LineChartPanel";
 import { MetricCard } from "../components/MetricCard";
+import { candleLimitForPeriod, DEFAULT_PERIOD, PeriodSelector, type PeriodKey } from "../components/PeriodSelector";
 import { ScatterChart, type ScatterPoint } from "../components/ScatterChart";
 import { StatusMessage } from "../components/StatusMessage";
 import {
+  arbitrageNotOperableWarning,
+  arbitrageZscoreActionableText,
+  arbitrageZscoreNotActionableText,
+  ARBITRAGE_BANDS_HELP,
   ARBITRAGE_CONCEPTS_HELP,
   ARBITRAGE_INTRO_HELP,
-  ARBITRAGE_NOT_OPERABLE_WARNING,
+  ARBITRAGE_KALMAN_HELP,
+  ARBITRAGE_LONG_ONLY_HELP,
   ARBITRAGE_PAIR_BACKTEST_FLAT_PERIODS_NOTE,
   ARBITRAGE_PAIR_BACKTEST_HELP,
   ARBITRAGE_PAIR_BACKTEST_NOT_OPERABLE_WARNING,
   ARBITRAGE_PURPOSE_HEADER,
+  ARBITRAGE_RATIO_HELP,
   ARBITRAGE_SCATTER_HELP,
   ARBITRAGE_SCATTER_NOISE_NOTE,
   ARBITRAGE_SCREENING_HELP,
-  ARBITRAGE_ZSCORE_ACTIONABLE_TEXT,
+  ARBITRAGE_STABILITY_THRESHOLD_HELP,
   ARBITRAGE_ZSCORE_EXTREMES_HELP,
-  ARBITRAGE_ZSCORE_NOT_ACTIONABLE_TEXT,
+  ARBITRAGE_ZSCORE_ZONES_HELP,
 } from "../helpTexts";
 import { COLORS } from "../theme";
 
 const SCREENING_INTERVAL = "1d";
 // Sin límite real de período en /api/pairs/detail (usa TODO el histórico
-// disponible) — se pide el mismo volumen para el scatter, así los puntos
-// son EXACTAMENTE los que ajustaron la recta de regresión (beta/alpha).
+// disponible) — se pide el mismo volumen para el scatter y la correlación,
+// así los puntos son EXACTAMENTE los que ajustaron la recta de regresión
+// (beta/alpha) y el par de fechas del backtest.
 const SCATTER_CANDLE_LIMIT = 60_000;
 
-// Fase 28: umbrales usados para colorear/anotar las métricas del detalle de
-// un par — los mismos números que ya describen ARBITRAGE_SCREENING_HELP/
-// ARBITRAGE_NOT_OPERABLE_WARNING (60% de ventanas estables) y la
-// convención estándar de significancia estadística (p<0.05), más un
-// umbral de "vida media útil" (días a pocas semanas) para que half-life
-// deje de mostrarse como un número neutro sin interpretación.
+// Fase 28: umbrales usados para colorear/anotar p-valor ADF y half-life —
+// convención estándar de significancia (p<0.05) y una noción de "vida
+// media útil" (días a pocas semanas). Fase 30: el umbral de ESTABILIDAD ya
+// NO es una constante acá — es `stabilityThreshold`, elegido por el
+// usuario (ver el slider del Componente 5).
 const PAIR_ADF_SIGNIFICANCE = 0.05;
-const PAIR_STABILITY_THRESHOLD = 0.6;
 const PAIR_HALF_LIFE_MAX_USEFUL_DAYS = 30;
+
+// Fase 30: defaults de los criterios configurables — los mismos que ya
+// traía el backend por defecto (pairs.backtest.DEFAULT_PAIR_*,
+// pairs.stability.DEFAULT_STABLE_FRACTION_THRESHOLD, config.TRANSACTION_COST_BPS),
+// para que el panel arranque mostrando exactamente lo que se pediría sin
+// pasar ningún parámetro.
+const DEFAULT_BT_ENTRY = 2.0;
+const DEFAULT_BT_EXIT = 0.5;
+const DEFAULT_BT_STOP = 3.0;
+const DEFAULT_BT_COST_BPS = 10;
+const DEFAULT_STABILITY_THRESHOLD = 0.6;
+const DEFAULT_BAND_N_STD = 2.0;
+
+type RatioMode = "simple" | "log_spread";
 
 /** `half_life_dias` viene en la unidad NATIVA del intervalo (días si es
  * diario, horas si es horario, ver `pairs.cointegration.half_life`) — para
@@ -66,12 +94,6 @@ const PAIR_HALF_LIFE_MAX_USEFUL_DAYS = 30;
 function halfLifeInDays(value: number, interval: string): number {
   return interval === "1h" ? value / 24 : value;
 }
-
-const ZSCORE_REFERENCE_LINES: ReferenceLineSpec[] = [
-  { price: 2, label: "+2", color: COLORS.danger },
-  { price: 0, label: "0", color: COLORS.textMuted },
-  { price: -2, label: "-2", color: COLORS.danger },
-];
 
 function formatPercent(fraction: number): string {
   return `${(fraction * 100).toFixed(0)}%`;
@@ -88,6 +110,22 @@ function formatHalfLife(dias: number | null, interval: string): string {
   return `${dias.toFixed(1)} ${unidad}`;
 }
 
+function formatCorr(value: number): string {
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)}`;
+}
+
+/** Recorta un array de series alineadas a `fechas` a los últimos `limit`
+ * puntos — Fase 30: el período elegido (Componente 1) solo afecta QUÉ
+ * TRAMO de las series se GRAFICA, no el cálculo en sí (beta, cointegración,
+ * Kalman y el backtest siguen usando TODO el histórico disponible, igual
+ * que antes de este componente).
+ */
+function trimTail<T>(values: T[], limit: number): T[] {
+  if (values.length <= limit) return values;
+  return values.slice(values.length - limit);
+}
+
 interface ArbitrageViewProps {
   assets: string[];
   interval: string;
@@ -97,14 +135,57 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
   const [assetY, setAssetY] = useState("ETH");
   const [assetX, setAssetX] = useState("BTC");
 
+  // Fase 30: período de VISUALIZACIÓN para los gráficos de ratio/spread/
+  // bandas/Kalman/z-score (Componentes 1-4) — reutiliza PeriodSelector tal
+  // cual, mismo patrón que Estadística/Comparación/Correlación.
+  const [period, setPeriod] = useState<PeriodKey>(DEFAULT_PERIOD);
+  const [ratioMode, setRatioMode] = useState<RatioMode>("simple");
+  const [bandNStd, setBandNStd] = useState(DEFAULT_BAND_N_STD);
+  const [stabilityThreshold, setStabilityThreshold] = useState(DEFAULT_STABILITY_THRESHOLD);
+  const [btEntry, setBtEntry] = useState(DEFAULT_BT_ENTRY);
+  const [btExit, setBtExit] = useState(DEFAULT_BT_EXIT);
+  const [btStop, setBtStop] = useState(DEFAULT_BT_STOP);
+  const [btCostBps, setBtCostBps] = useState(DEFAULT_BT_COST_BPS);
+  const [btLongOnly, setBtLongOnly] = useState(false);
+
   const screeningQuery = useQuery({
     queryKey: ["pairs-screening", SCREENING_INTERVAL],
     queryFn: () => getPairsScreening(SCREENING_INTERVAL),
   });
 
   const detailQuery = useQuery({
-    queryKey: ["pairs-detail", assetY, assetX, interval],
-    queryFn: () => getPairsDetail(assetY, assetX, interval),
+    queryKey: [
+      "pairs-detail",
+      assetY,
+      assetX,
+      interval,
+      btEntry,
+      btExit,
+      btStop,
+      btCostBps,
+      btLongOnly,
+      stabilityThreshold,
+      bandNStd,
+    ],
+    queryFn: () =>
+      getPairsDetail(assetY, assetX, interval, {
+        btEntry,
+        btExit,
+        btStop,
+        btCostBps,
+        btLongOnly,
+        stabilityThreshold,
+        bandNStd,
+      }),
+    enabled: assetY !== assetX,
+  });
+
+  // Fase 30 (Componente 5): correlación ACTUAL del par — reutiliza
+  // `/api/correlation` (Fase 13b) tal cual en vez de recalcularla acá, así
+  // el número coincide siempre con el que muestra la vista "Correlación".
+  const correlationQuery = useQuery({
+    queryKey: ["correlation-for-pair", interval, SCATTER_CANDLE_LIMIT],
+    queryFn: () => getCorrelation(interval, SCATTER_CANDLE_LIMIT, "pearson"),
     enabled: assetY !== assetX,
   });
 
@@ -132,28 +213,161 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
   const detailErrorMessage =
     detailError instanceof ApiError ? detailError.message : detailError ? String(detailError) : null;
 
+  const correlationActual = useMemo(() => {
+    const correlation = correlationQuery.data;
+    if (!correlation) return null;
+    const iY = correlation.activos.indexOf(assetY);
+    const iX = correlation.activos.indexOf(assetX);
+    if (iY === -1 || iX === -1) return null;
+    return correlation.matriz[iY][iX];
+  }, [correlationQuery.data, assetY, assetX]);
+
+  // Fase 30: recorta TODAS las series alineadas a `fechas` al período
+  // elegido, de una sola vez — el cálculo (full histórico) no cambia, solo
+  // lo que se grafica.
+  const trimmed = useMemo(() => {
+    if (!detail) return null;
+    const limit = candleLimitForPeriod(period, interval);
+    const n = Math.min(limit, detail.fechas.length);
+    const fechas = trimTail(detail.fechas, limit);
+    const startFecha = fechas[0];
+    return {
+      fechas,
+      ratio: trimTail(detail.ratio, limit),
+      spread: trimTail(detail.spread, limit),
+      bandaMedia: trimTail(detail.banda_media, limit),
+      bandaSuperior: trimTail(detail.banda_superior, limit),
+      bandaInferior: trimTail(detail.banda_inferior, limit),
+      kalmanBeta: trimTail(detail.kalman_beta, limit),
+      zscore: trimTail(detail.zscore, limit),
+      n,
+      startFecha,
+    };
+  }, [detail, period, interval]);
+
   const zscoreMarkers = useMemo((): LineSeriesMarkerSpec[] => {
-    if (!detail) return [];
-    return detail.zscore_extremos.map((extremo) => ({
-      time: extremo.fecha,
-      price: extremo.z,
-      color: extremo.z > 0 ? COLORS.danger : COLORS.accent,
-      shape: extremo.z > 0 ? "arrowUp" : "arrowDown",
-    }));
-  }, [detail]);
+    if (!detail || !trimmed) return [];
+    return detail.zscore_extremos
+      .filter((extremo) => !trimmed.startFecha || extremo.fecha >= trimmed.startFecha)
+      .map((extremo) => ({
+        time: extremo.fecha,
+        price: extremo.z,
+        color: extremo.z > 0 ? COLORS.danger : COLORS.accent,
+        shape: extremo.z > 0 ? "arrowUp" : "arrowDown",
+      }));
+  }, [detail, trimmed]);
 
   const zscoreSeries = useMemo(() => {
-    if (!detail) return [];
+    if (!detail || !trimmed) return [];
     return [
       {
         id: "zscore",
         label: `z-score(${detail.asset_y}~${detail.asset_x})`,
         color: COLORS.accent,
-        data: detail.fechas.map((fecha, i) => ({ time: fecha, value: detail.zscore[i] ?? null })),
+        data: trimmed.fechas.map((fecha, i) => ({ time: fecha, value: trimmed.zscore[i] ?? null })),
         markers: zscoreMarkers,
       },
     ];
-  }, [detail, zscoreMarkers]);
+  }, [detail, trimmed, zscoreMarkers]);
+
+  const zscoreReferenceLines = useMemo((): ReferenceLineSpec[] => {
+    return [
+      { price: btEntry, label: `+entrada (${btEntry})`, color: COLORS.danger },
+      { price: btExit, label: `+salida (${btExit})`, color: COLORS.textMuted },
+      { price: 0, label: "0", color: COLORS.textMuted },
+      { price: -btExit, label: `-salida (${btExit})`, color: COLORS.textMuted },
+      { price: -btEntry, label: `-entrada (${btEntry})`, color: COLORS.danger },
+    ];
+  }, [btEntry, btExit]);
+
+  // Fase 30, Componente 1: ratio crudo o spread log, según el toggle.
+  const ratioSeries = useMemo(() => {
+    if (!detail || !trimmed) return [];
+    const isSimple = ratioMode === "simple";
+    const values = isSimple ? trimmed.ratio : trimmed.spread;
+    return [
+      {
+        id: "ratio",
+        label: isSimple
+          ? `Ratio ${detail.asset_y}/${detail.asset_x}`
+          : `Spread log(${detail.asset_y}) - β·log(${detail.asset_x})`,
+        color: COLORS.accent,
+        data: trimmed.fechas.map((fecha, i) => ({ time: fecha, value: values[i] ?? null })),
+      },
+    ];
+  }, [detail, trimmed, ratioMode]);
+
+  // Fase 30, Componente 2: spread + bandas, con marcas donde el spread
+  // salió de la banda (zona "extrema" respecto de su comportamiento reciente).
+  const bandExceedMarkers = useMemo((): LineSeriesMarkerSpec[] => {
+    if (!trimmed) return [];
+    const markers: LineSeriesMarkerSpec[] = [];
+    for (let i = 0; i < trimmed.fechas.length; i++) {
+      const s = trimmed.spread[i];
+      const up = trimmed.bandaSuperior[i];
+      const lo = trimmed.bandaInferior[i];
+      if (s === null || s === undefined) continue;
+      if (up !== null && up !== undefined && s > up) {
+        markers.push({ time: trimmed.fechas[i], price: s, color: COLORS.danger, shape: "arrowUp" });
+      } else if (lo !== null && lo !== undefined && s < lo) {
+        markers.push({ time: trimmed.fechas[i], price: s, color: COLORS.accent, shape: "arrowDown" });
+      }
+    }
+    return markers;
+  }, [trimmed]);
+
+  const bandsSeries = useMemo(() => {
+    if (!detail || !trimmed) return [];
+    return [
+      {
+        id: "spread",
+        label: "Spread",
+        color: COLORS.accent,
+        data: trimmed.fechas.map((fecha, i) => ({ time: fecha, value: trimmed.spread[i] ?? null })),
+        markers: bandExceedMarkers,
+      },
+      {
+        id: "media",
+        label: "Media móvil",
+        color: COLORS.textMuted,
+        lineWidth: 1 as const,
+        data: trimmed.fechas.map((fecha, i) => ({ time: fecha, value: trimmed.bandaMedia[i] ?? null })),
+      },
+      {
+        id: "superior",
+        label: `+${bandNStd}σ`,
+        color: COLORS.danger,
+        lineWidth: 1 as const,
+        data: trimmed.fechas.map((fecha, i) => ({ time: fecha, value: trimmed.bandaSuperior[i] ?? null })),
+      },
+      {
+        id: "inferior",
+        label: `-${bandNStd}σ`,
+        color: COLORS.danger,
+        lineWidth: 1 as const,
+        data: trimmed.fechas.map((fecha, i) => ({ time: fecha, value: trimmed.bandaInferior[i] ?? null })),
+      },
+    ];
+  }, [detail, trimmed, bandExceedMarkers, bandNStd]);
+
+  // Fase 30, Componente 3: hedge ratio DINÁMICO (Kalman), comparado contra
+  // el único beta estático (OLS) de toda la muestra vía una línea de referencia.
+  const kalmanSeries = useMemo(() => {
+    if (!detail || !trimmed) return [];
+    return [
+      {
+        id: "kalman-beta",
+        label: `Beta Kalman (${detail.asset_y}~${detail.asset_x})`,
+        color: COLORS.accent,
+        data: trimmed.fechas.map((fecha, i) => ({ time: fecha, value: trimmed.kalmanBeta[i] ?? null })),
+      },
+    ];
+  }, [detail, trimmed]);
+
+  const kalmanReferenceLines = useMemo((): ReferenceLineSpec[] => {
+    if (!detail) return [];
+    return [{ price: detail.beta, label: "beta OLS (estático)", color: COLORS.textMuted }];
+  }, [detail]);
 
   const backtestEquitySeries = useMemo(() => {
     if (!detail) return [];
@@ -200,6 +414,7 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
   }
 
   const noEstable = detail ? !(detail.estabilidad?.estable ?? false) : false;
+  const stabilityThresholdPct = Math.round(stabilityThreshold * 100);
 
   return (
     <section className="view">
@@ -219,7 +434,8 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
       {screening && (
         <>
           <p className="view-note">
-            {screening.n_estables} de {screening.n_total} pares operables (fracción cointegrada rolling ≥ 60%).
+            {screening.n_estables} de {screening.n_total} pares operables (fracción cointegrada rolling ≥ 60%,
+            umbral fijo de este ranking de referencia — el panel de abajo deja elegir el propio).
           </p>
           <table className="metrics-table">
             <thead>
@@ -271,7 +487,7 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
         </>
       )}
 
-      <h3 className="panel-subtitle">Detalle de un par</h3>
+      <h3 className="panel-subtitle">Panel del par</h3>
 
       <div className="asset-selector">
         <label className="asset-selector__field">
@@ -303,19 +519,118 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
         </StatusMessage>
       )}
 
-      {detail && (
+      {detail && trimmed && (
         <>
-          {noEstable && <div className="honesty-banner">{ARBITRAGE_NOT_OPERABLE_WARNING}</div>}
+          {noEstable && <div className="honesty-banner">{arbitrageNotOperableWarning(stabilityThresholdPct)}</div>}
 
+          <h3 className="panel-subtitle">
+            1 — Ratio / spread en el tiempo
+            <InfoTooltip text={ARBITRAGE_RATIO_HELP} />
+          </h3>
+          <p className="view-note">
+            Cómo cambió la relación entre {detail.asset_y} y {detail.asset_x} con el tiempo — no un único número,
+            sino la película completa.
+          </p>
+          <div className="chart-controls-row">
+            <PeriodSelector active={period} onChange={setPeriod} />
+            <div className="period-selector" role="group" aria-label="Modo del ratio">
+              <button
+                type="button"
+                className={`period-selector__pill${ratioMode === "simple" ? " period-selector__pill--active" : ""}`}
+                onClick={() => setRatioMode("simple")}
+              >
+                Ratio simple
+              </button>
+              <button
+                type="button"
+                className={`period-selector__pill${ratioMode === "log_spread" ? " period-selector__pill--active" : ""}`}
+                onClick={() => setRatioMode("log_spread")}
+              >
+                Spread log
+              </button>
+            </div>
+          </div>
+          <LineChartPanel series={ratioSeries} height={280} />
+
+          <h3 className="panel-subtitle">
+            2 — Spread con bandas (media móvil ± {bandNStd}σ)
+            <InfoTooltip text={ARBITRAGE_BANDS_HELP} />
+          </h3>
+          <p className="view-note">
+            Las flechas marcan los momentos donde el spread salió de la banda: rojas hacia arriba (por encima de
+            +{bandNStd}σ), celestes hacia abajo (por debajo de -{bandNStd}σ).
+          </p>
+          <div className="pair-controls">
+            <label className="pair-controls__field">
+              Ancho de banda (N desvíos)
+              <span className="pair-controls__field-value">{bandNStd.toFixed(1)}σ</span>
+              <input
+                type="range"
+                className="pair-controls__slider"
+                min={0.5}
+                max={4}
+                step={0.5}
+                value={bandNStd}
+                onChange={(event) => setBandNStd(Number(event.target.value))}
+              />
+            </label>
+          </div>
+          <LineChartPanel series={bandsSeries} height={320} />
+
+          <h3 className="panel-subtitle">
+            3 — Relación dinámica: hedge ratio (Kalman) en el tiempo
+            <InfoTooltip text={ARBITRAGE_KALMAN_HELP} />
+          </h3>
+          <p className="view-note">
+            La línea gris punteada es el ÚNICO beta estático (OLS, toda la muestra a la vez, {detail.beta.toFixed(3)}
+            ) — la línea de color es cómo ese "tipo de cambio de equilibrio" fue cambiando día a día.
+          </p>
+          <LineChartPanel series={kalmanSeries} height={260} referenceLines={kalmanReferenceLines} />
+
+          <h3 className="panel-subtitle">
+            4 — Z-score con zonas de entrada/salida
+            <InfoTooltip text={ARBITRAGE_ZSCORE_ZONES_HELP} />
+          </h3>
+          <p className="view-note">
+            Las flechas marcan los extremos históricos (|z| ≥ 2). Los umbrales de las líneas se configuran en el
+            backtest de más abajo (Componente 6) — son los mismos.
+            <InfoTooltip text={ARBITRAGE_ZSCORE_EXTREMES_HELP} placement="bottom" />
+          </p>
+          <LineChartPanel series={zscoreSeries} height={320} referenceLines={zscoreReferenceLines} />
+
+          <div className="zscore-indicator">
+            <span className="zscore-indicator__label">
+              Z-score actual del spread
+              <InfoTooltip text={ARBITRAGE_CONCEPTS_HELP.zscore} placement="bottom" />
+            </span>
+            <span
+              className="zscore-indicator__value"
+              style={{
+                color:
+                  detail.zscore_actual !== null && Math.abs(detail.zscore_actual) > btEntry
+                    ? COLORS.danger
+                    : COLORS.text,
+              }}
+            >
+              {detail.zscore_actual !== null ? detail.zscore_actual.toFixed(2) : "—"}
+            </span>
+            <span className="zscore-indicator__interpretation">{detail.zscore_interpretacion}</span>
+          </div>
+          <p className="view-note">
+            {noEstable
+              ? arbitrageZscoreNotActionableText(stabilityThresholdPct)
+              : arbitrageZscoreActionableText(stabilityThresholdPct)}
+          </p>
+
+          <h3 className="panel-subtitle">5 — Métricas de la relación</h3>
           <div className="metric-grid">
             <MetricCard
-              label="¿Cointegrado? (in-sample)"
-              value={detail.es_cointegrado ? "Sí" : "No"}
-              valueColor={detail.es_cointegrado ? COLORS.success : COLORS.danger}
-              help={ARBITRAGE_CONCEPTS_HELP.cointegracion}
+              label="Correlación (actual)"
+              value={correlationActual !== null ? formatCorr(correlationActual) : "Cargando…"}
+              help="Correlación de Pearson entre los retornos de las dos monedas — ver la vista Correlación para el detalle. Alta correlación NO implica cointegración: dos activos pueden moverse muy parecido sin que exista un spread estable entre ellos."
             />
             <MetricCard
-              label="p-valor ADF"
+              label="p-valor ADF (in-sample)"
               value={detail.p_valor_adf.toFixed(4)}
               valueColor={detail.p_valor_adf < PAIR_ADF_SIGNIFICANCE ? COLORS.success : COLORS.danger}
               help={ARBITRAGE_CONCEPTS_HELP.cointegracion}
@@ -349,68 +664,53 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
               }
             />
             <MetricCard
-              label="% ventanas estables"
+              label="% ventanas cointegradas"
               value={detail.estabilidad ? formatPercent(detail.estabilidad.fraccion_cointegrada) : "Sin dato"}
               help={ARBITRAGE_CONCEPTS_HELP.estabilidad}
               valueColor={
                 detail.estabilidad
-                  ? detail.estabilidad.fraccion_cointegrada >= PAIR_STABILITY_THRESHOLD
+                  ? detail.estabilidad.fraccion_cointegrada >= stabilityThreshold
                     ? COLORS.success
                     : COLORS.danger
                   : undefined
               }
               subtext={
                 detail.estabilidad
-                  ? detail.estabilidad.fraccion_cointegrada >= PAIR_STABILITY_THRESHOLD
-                    ? "≥ 60%: cumple el umbral de operable"
-                    : "necesita ≥ 60% para considerarse operable"
+                  ? detail.estabilidad.fraccion_cointegrada >= stabilityThreshold
+                    ? `≥ ${stabilityThresholdPct}%: cumple TU criterio`
+                    : `necesita ≥ ${stabilityThresholdPct}% (TU criterio) para considerarse operable`
                   : undefined
               }
               subtextColor={
-                detail.estabilidad && detail.estabilidad.fraccion_cointegrada < PAIR_STABILITY_THRESHOLD
+                detail.estabilidad && detail.estabilidad.fraccion_cointegrada < stabilityThreshold
                   ? COLORS.danger
                   : undefined
               }
             />
             <MetricCard
-              label="Veredicto"
+              label={`Veredicto (con TU umbral de ${stabilityThresholdPct}%)`}
               value={noEstable ? "NO operable" : "Operable"}
               valueColor={noEstable ? COLORS.danger : COLORS.success}
             />
           </div>
+          {detail.estabilidad_mensaje && <p className="view-note">{detail.estabilidad_mensaje}</p>}
 
-          <div className="zscore-indicator">
-            <span className="zscore-indicator__label">
-              Z-score actual del spread
-              <InfoTooltip text={ARBITRAGE_CONCEPTS_HELP.zscore} placement="bottom" />
-            </span>
-            <span
-              className="zscore-indicator__value"
-              style={{
-                color:
-                  detail.zscore_actual !== null && Math.abs(detail.zscore_actual) > 2 ? COLORS.danger : COLORS.text,
-              }}
-            >
-              {detail.zscore_actual !== null ? detail.zscore_actual.toFixed(2) : "—"}
-            </span>
-            <span className="zscore-indicator__interpretation">{detail.zscore_interpretacion}</span>
+          <div className="pair-controls">
+            <label className="pair-controls__field">
+              Umbral de estabilidad (% ventanas cointegradas)
+              <span className="pair-controls__field-value">{stabilityThresholdPct}%</span>
+              <input
+                type="range"
+                className="pair-controls__slider"
+                min={0}
+                max={1}
+                step={0.05}
+                value={stabilityThreshold}
+                onChange={(event) => setStabilityThreshold(Number(event.target.value))}
+              />
+              <InfoTooltip text={ARBITRAGE_STABILITY_THRESHOLD_HELP} placement="bottom" />
+            </label>
           </div>
-          <p className="view-note">{noEstable ? ARBITRAGE_ZSCORE_NOT_ACTIONABLE_TEXT : ARBITRAGE_ZSCORE_ACTIONABLE_TEXT}</p>
-
-          <h3 className="panel-subtitle">
-            Spread (z-score) con bandas ±2 / 0
-            <InfoTooltip text={ARBITRAGE_CONCEPTS_HELP.spread} />
-          </h3>
-          <p className="view-note">
-            Las flechas marcan los extremos históricos (|z| ≥ 2): rojas hacia arriba (spread muy estirado hacia
-            arriba), celestes hacia abajo (muy estirado hacia abajo).
-            <InfoTooltip text={ARBITRAGE_ZSCORE_EXTREMES_HELP} placement="bottom" />
-          </p>
-          <LineChartPanel series={zscoreSeries} height={320} referenceLines={ZSCORE_REFERENCE_LINES} />
-
-          {detail.estabilidad_mensaje && (
-            <p className="view-note">{detail.estabilidad_mensaje}</p>
-          )}
 
           <h3 className="panel-subtitle">
             Dispersión y recta de regresión
@@ -431,11 +731,67 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
           )}
 
           <h3 className="panel-subtitle">
-            Backtest del par
+            6 — Backtest configurable
             <InfoTooltip text={ARBITRAGE_PAIR_BACKTEST_HELP} />
           </h3>
           {noEstable && <div className="honesty-banner">{ARBITRAGE_PAIR_BACKTEST_NOT_OPERABLE_WARNING}</div>}
-          <div className="metric-grid">
+
+          <div className="backtest-params">
+            <label className="backtest-params__field">
+              Umbral de entrada (|z|)
+              <input
+                type="number"
+                min={0}
+                step={0.1}
+                className="backtest-params__input"
+                value={btEntry}
+                onChange={(event) => setBtEntry(Number(event.target.value))}
+              />
+            </label>
+            <label className="backtest-params__field">
+              Umbral de salida (|z|)
+              <input
+                type="number"
+                min={0}
+                step={0.1}
+                className="backtest-params__input"
+                value={btExit}
+                onChange={(event) => setBtExit(Number(event.target.value))}
+              />
+            </label>
+            <label className="backtest-params__field">
+              Stop-loss (|z|)
+              <input
+                type="number"
+                min={0}
+                step={0.1}
+                className="backtest-params__input"
+                value={btStop}
+                onChange={(event) => setBtStop(Number(event.target.value))}
+              />
+            </label>
+            <label className="backtest-params__field">
+              Costo de transacción (bps)
+              <input
+                type="number"
+                min={0}
+                step={1}
+                className="backtest-params__input"
+                value={btCostBps}
+                onChange={(event) => setBtCostBps(Number(event.target.value))}
+              />
+            </label>
+          </div>
+
+          <div className="panel-subtitle-row" style={{ marginTop: "var(--space-3)" }}>
+            <label className={`toggle-chip${btLongOnly ? " toggle-chip--active" : ""}`}>
+              <input type="checkbox" checked={btLongOnly} onChange={(event) => setBtLongOnly(event.target.checked)} />
+              Long-only (rotación, sin ir en corto)
+              <InfoTooltip text={ARBITRAGE_LONG_ONLY_HELP} placement="bottom" />
+            </label>
+          </div>
+
+          <div className="metric-grid" style={{ marginTop: "var(--space-3)" }}>
             <MetricCard
               label="Retorno total"
               value={formatScaledPercent(detail.backtest.metrics.total_return)}
@@ -452,6 +808,10 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
               valueColor={COLORS.danger}
             />
             <MetricCard label="Cantidad de operaciones" value={detail.backtest.metrics.n_trades} />
+            <MetricCard
+              label="% tiempo fuera del mercado"
+              value={`${(detail.backtest.metrics.pct_tiempo_fuera * 100).toFixed(1)}%`}
+            />
           </div>
           <LineChartPanel series={backtestEquitySeries} height={280} />
           <p className="view-note">{ARBITRAGE_PAIR_BACKTEST_FLAT_PERIODS_NOTE}</p>

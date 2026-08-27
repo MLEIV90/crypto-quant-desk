@@ -120,10 +120,22 @@ from ml.features import align_features_labels, build_feature_matrix
 from ml.labeling import get_daily_volatility, triple_barrier_labels
 from ml.models import evaluate_primary_with_roc_auc, feature_importances, fit_final, latest_oos_prediction, t1_from_labels
 from models.garch import conditional_volatility, select_best_model, volatility_regime
-from pairs.backtest import DEFAULT_PAIR_ENTRY, DEFAULT_PAIR_EXIT, DEFAULT_PAIR_STOP, backtest_pair
+from pairs.backtest import (
+    DEFAULT_PAIR_ENTRY,
+    DEFAULT_PAIR_EXIT,
+    DEFAULT_PAIR_STOP,
+    backtest_pair,
+    backtest_pair_rotation,
+)
 from pairs.cointegration import engle_granger, half_life
+from pairs.kalman_hedge import kalman_hedge_ratio
 from pairs.signals import zscore
-from pairs.stability import rolling_cointegration, screen_pairs_stability, stability_summary
+from pairs.stability import (
+    DEFAULT_STABLE_FRACTION_THRESHOLD,
+    rolling_cointegration,
+    screen_pairs_stability,
+    stability_summary,
+)
 from reports.pdf_report import build_report
 from signals.engine import (
     generate_positions,
@@ -1486,13 +1498,19 @@ def get_pairs_detail(
     bt_exit: float = DEFAULT_PAIR_EXIT,
     bt_stop: float = DEFAULT_PAIR_STOP,
     bt_cost_bps: float = TRANSACTION_COST_BPS,
+    bt_long_only: bool = False,
+    stability_threshold: float = DEFAULT_STABLE_FRACTION_THRESHOLD,
+    band_window: int = 30,
+    band_n_std: float = 2.0,
 ) -> PairDetailResponse:
     """Reutiliza `pairs.cointegration.engle_granger`/`half_life`,
-    `pairs.stability.rolling_cointegration`/`stability_summary` y (Fase 15b)
-    `pairs.backtest.backtest_pair` tal cual (NO reimplementa nada de
-    `pairs/`) sobre precios cargados vía `_load_df` (mismo punto de entrada
-    que el resto de la API, respeta `interval` de verdad — a diferencia de
-    `/api/pairs/screening`, acá SÍ se puede pedir `interval="1h"`).
+    `pairs.kalman_hedge.kalman_hedge_ratio`,
+    `pairs.stability.rolling_cointegration`/`stability_summary` y (Fase 15b,
+    ampliado en 30) `pairs.backtest.backtest_pair`/`backtest_pair_rotation`
+    tal cual (NO reimplementa nada de `pairs/`) sobre precios cargados vía
+    `_load_df` (mismo punto de entrada que el resto de la API, respeta
+    `interval` de verdad — a diferencia de `/api/pairs/screening`, acá SÍ se
+    puede pedir `interval="1h"`).
 
     Si no hay historia suficiente para ni una ventana rolling completa
     (`pairs.stability.rolling_cointegration` pide 365 observaciones por
@@ -1501,16 +1519,35 @@ def get_pairs_detail(
     endpoint entero: el resto del análisis (cointegración in-sample, spread,
     z-score, backtest) sigue siendo válido igual.
 
-    `bt_entry`/`bt_exit`/`bt_stop`/`bt_cost_bps` (Fase 15b): parámetros del
-    backtest de `pairs.backtest.backtest_pair` — opcionales, con los mismos
-    defaults que esa función (ver su docstring, incluida la nota de por qué
-    `bt_exit` default es 0.5 y no 0.0).
+    Fase 30 — CRITERIOS EN MANOS DEL USUARIO, sin umbrales fijos escondidos:
+
+    - `bt_entry`/`bt_exit`/`bt_stop`/`bt_cost_bps` (Fase 15b): parámetros del
+      backtest — opcionales, con los mismos defaults que
+      `pairs.backtest.backtest_pair` (ver su docstring, incluida la nota de
+      por qué `bt_exit` default es 0.5 y no 0.0). También determinan las
+      zonas de entrada/salida que se muestran junto al z-score.
+    - `bt_long_only`: si es True, corre `pairs.backtest.backtest_pair_rotation`
+      (rota 100% entre Y/X, nunca en corto) en vez de `backtest_pair`
+      (dollar-neutral, long-short clásico) — ver `PairBacktestResult.modo`.
+    - `stability_threshold` (default 0.6, el mismo de
+      `pairs.stability.DEFAULT_STABLE_FRACTION_THRESHOLD`): fracción mínima
+      de ventanas cointegradas para que `estabilidad.estable` sea True — el
+      usuario elige qué tan exigente ser, no queda fijo en el backend.
+    - `band_window`/`band_n_std` (default 30/2.0): ventana y multiplicador
+      de desvío estándar para `banda_media`/`banda_superior`/`banda_inferior`
+      (media y bandas móviles del spread, Componente 2 del panel).
     """
     _validate_asset(asset_y)
     _validate_asset(asset_x)
     if asset_y == asset_x:
         raise HTTPException(status_code=400, detail="asset_y y asset_x deben ser distintos")
     _validate_interval(interval)
+    if not (0.0 <= stability_threshold <= 1.0):
+        raise HTTPException(status_code=400, detail="stability_threshold debe estar en [0, 1]")
+    if band_window < 2:
+        raise HTTPException(status_code=400, detail="band_window debe ser >= 2")
+    if band_n_std <= 0:
+        raise HTTPException(status_code=400, detail="band_n_std debe ser > 0")
 
     y = _load_df(asset_y, interval)["close"]
     x = _load_df(asset_x, interval)["close"]
@@ -1521,6 +1558,24 @@ def get_pairs_detail(
     z = zscore(spread)
     z_actual = _none_if_nan(float(z.iloc[-1])) if len(z) else None
 
+    # Fase 30, Componente 1: ratio de precio CRUDO (sin logaritmo) — "el
+    # tipo de cambio" entre las dos monedas, alineado a las mismas fechas
+    # que ya usa el spread.
+    ratio = (y / x).reindex(spread.index)
+
+    # Fase 30, Componente 2: media/desvío móviles del spread -> bandas.
+    banda_media = spread.rolling(window=band_window).mean()
+    banda_std = spread.rolling(window=band_window).std()
+    banda_superior = banda_media + band_n_std * banda_std
+    banda_inferior = banda_media - band_n_std * banda_std
+
+    # Fase 30, Componente 3: hedge ratio DINÁMICO (vs. "beta", un único
+    # valor estático para toda la muestra) — reutiliza kalman_hedge_ratio
+    # tal cual, reindexado a las mismas fechas del spread.
+    kalman = kalman_hedge_ratio(y, x)
+    kalman_beta = kalman["beta"].reindex(spread.index)
+    kalman_alpha = kalman["alpha"].reindex(spread.index)
+
     zscore_extremos = [
         PairZscoreExtreme(fecha=fecha.to_pydatetime(), z=float(value))
         for fecha, value in z.items()
@@ -1529,15 +1584,16 @@ def get_pairs_detail(
 
     try:
         rolling = rolling_cointegration(y, x)
-        summary = stability_summary(rolling)
+        summary = stability_summary(rolling, stable_fraction_threshold=stability_threshold)
         estabilidad = PairStabilitySummary(**summary)
         estabilidad_mensaje = None
     except ValueError as exc:
         estabilidad = None
         estabilidad_mensaje = f"No se pudo evaluar estabilidad rolling: {exc}"
 
+    backtest_fn = backtest_pair_rotation if bt_long_only else backtest_pair
     try:
-        bt = backtest_pair(
+        bt = backtest_fn(
             y, x, hedge_ratio=eg["beta"], entry=bt_entry, exit=bt_exit, stop=bt_stop, cost_bps=bt_cost_bps
         )
     except ValueError as exc:
@@ -1546,6 +1602,7 @@ def get_pairs_detail(
         # query params, no una falla del servidor.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     backtest = PairBacktestResult(
+        modo="long_only" if bt_long_only else "long_short",
         fechas=_dates_to_list(bt["equity_curve"].index),
         equity_curve=[float(v) for v in bt["equity_curve"].to_numpy()],
         metrics=PairBacktestMetrics(**bt["metrics"]),
@@ -1562,7 +1619,13 @@ def get_pairs_detail(
         es_cointegrado=eg["es_cointegrado"],
         half_life_dias=_none_if_nonfinite(hl),
         fechas=_dates_to_list(spread.index),
+        ratio=_series_to_list(ratio),
         spread=_series_to_list(spread),
+        banda_media=_series_to_list(banda_media),
+        banda_superior=_series_to_list(banda_superior),
+        banda_inferior=_series_to_list(banda_inferior),
+        kalman_beta=_series_to_list(kalman_beta),
+        kalman_alpha=_series_to_list(kalman_alpha),
         zscore=_series_to_list(z),
         zscore_actual=z_actual,
         zscore_interpretacion=_interpret_zscore(z_actual),

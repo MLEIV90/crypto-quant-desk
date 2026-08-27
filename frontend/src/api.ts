@@ -48,7 +48,7 @@ export class ApiError extends Error {
   }
 }
 
-async function apiGet<T>(path: string, params: Record<string, string | number> = {}): Promise<T> {
+async function apiGet<T>(path: string, params: Record<string, string | number | boolean> = {}): Promise<T> {
   const url = new URL(path, API_BASE_URL);
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, String(value));
@@ -293,13 +293,47 @@ export function getPairsScreening(interval: string = "1d"): Promise<PairScreenin
   return apiGet<PairScreeningResponse>("/api/pairs/screening", { interval });
 }
 
-/**
- * Detalle de un par: cointegración, spread, z-score y estabilidad rolling —
- * ver `api/main.py::get_pairs_detail` (Fase 12b). A diferencia del
- * screening, sí respeta `interval`.
+/** Parámetros configurables del panel de un par (Fase 30) — todos
+ * opcionales, con los mismos defaults que `api/main.py::get_pairs_detail`.
  */
-export function getPairsDetail(assetY: string, assetX: string, interval: string): Promise<PairDetailResponse> {
-  return apiGet<PairDetailResponse>("/api/pairs/detail", { asset_y: assetY, asset_x: assetX, interval });
+export interface PairDetailParams {
+  btEntry?: number;
+  btExit?: number;
+  btStop?: number;
+  btCostBps?: number;
+  btLongOnly?: boolean;
+  stabilityThreshold?: number;
+  bandWindow?: number;
+  bandNStd?: number;
+}
+
+/**
+ * Detalle de un par: cointegración, ratio/spread con bandas, hedge ratio
+ * de Kalman, z-score, estabilidad rolling y backtest — ver
+ * `api/main.py::get_pairs_detail` (Fase 12b, ampliado en 15b/30). A
+ * diferencia del screening, sí respeta `interval`.
+ *
+ * Fase 30: `params` deja los criterios (umbrales del backtest, umbral de
+ * estabilidad, ancho de las bandas, modo long-only vs. long-short) EN
+ * MANOS DEL USUARIO — nada queda fijo del lado del cliente, todo se manda
+ * tal cual al backend, que ya trae sus propios defaults si se omiten.
+ */
+export function getPairsDetail(
+  assetY: string,
+  assetX: string,
+  interval: string,
+  params: PairDetailParams = {},
+): Promise<PairDetailResponse> {
+  const query: Record<string, string | number | boolean> = { asset_y: assetY, asset_x: assetX, interval };
+  if (params.btEntry !== undefined) query.bt_entry = params.btEntry;
+  if (params.btExit !== undefined) query.bt_exit = params.btExit;
+  if (params.btStop !== undefined) query.bt_stop = params.btStop;
+  if (params.btCostBps !== undefined) query.bt_cost_bps = params.btCostBps;
+  if (params.btLongOnly !== undefined) query.bt_long_only = params.btLongOnly;
+  if (params.stabilityThreshold !== undefined) query.stability_threshold = params.stabilityThreshold;
+  if (params.bandWindow !== undefined) query.band_window = params.bandWindow;
+  if (params.bandNStd !== undefined) query.band_n_std = params.bandNStd;
+  return apiGet<PairDetailResponse>("/api/pairs/detail", query);
 }
 
 /**

@@ -734,7 +734,9 @@ class PairZscoreExtreme(BaseModel):
 
 
 class PairBacktestMetrics(BaseModel):
-    """Métricas de `backtest.engine.run_backtest` sobre el spread (Fase 15b), tal cual."""
+    """Métricas de `backtest.engine.run_backtest` (modo `long_short`) o de
+    `pairs.backtest.backtest_pair_rotation` (modo `long_only`, Fase 30) —
+    misma forma en ambos casos, ver `PairBacktestResult.modo`."""
 
     total_return: float
     cagr: float
@@ -747,14 +749,17 @@ class PairBacktestMetrics(BaseModel):
     turnover_medio_diario: float
     n_trades: int
     exposicion_media: float
+    pct_tiempo_fuera: float = Field(
+        description="Fracción de días con posición efectiva EXACTAMENTE 0 (sin señal, o recién cerrada/warmup)"
+    )
     hit_rate: float
 
 
 class PairBacktestResult(BaseModel):
-    """Resultado de `pairs.backtest.backtest_pair` (Fase 15b) — la estrategia
-    de reversión sobre ESTE par, con sus supuestos (dollar-neutral,
-    rebalanceo diario, retornos simples — ver el docstring de
-    `pairs/backtest.py`) documentados ahí, no acá.
+    """Resultado de `pairs.backtest.backtest_pair` (Fase 15b) o
+    `pairs.backtest.backtest_pair_rotation` (Fase 30) sobre ESTE par, según
+    `modo` — con sus supuestos (ver el docstring de `pairs/backtest.py`)
+    documentados ahí, no acá.
 
     HONESTIDAD: este backtest existe para PONER A PRUEBA si el par es
     operable, no para recomendar operarlo — sobre un par no establemente
@@ -762,8 +767,9 @@ class PairBacktestResult(BaseModel):
     inestables (ver el texto de la vista "Arbitraje" del frontend).
     """
 
+    modo: str = Field(description='"long_short" (dollar-neutral, backtest_pair) o "long_only" (rotación, backtest_pair_rotation)')
     fechas: list[datetime]
-    equity_curve: list[float] = Field(description="Base 1.0, ver backtest.engine.run_backtest")
+    equity_curve: list[float] = Field(description="Base 1.0")
     metrics: PairBacktestMetrics
 
 
@@ -788,7 +794,25 @@ class PairDetailResponse(BaseModel):
         description="Vida media de reversión, en velas del interval pedido. null si el spread no revierte (theta>=0, ver pairs.cointegration.half_life)"
     )
     fechas: list[datetime]
+    ratio: list[float | None] = Field(
+        default_factory=list,
+        description="Fase 30: precio_y / precio_x cruda (sin logaritmo) — 'el tipo de cambio' entre las dos monedas, mismo índice que 'fechas'",
+    )
     spread: list[float | None] = Field(description="log(y) - alpha - beta*log(x), residuo de la regresión de cointegración")
+    banda_media: list[float | None] = Field(
+        default_factory=list, description="Fase 30: media móvil del spread (ventana 'band_window') — el 'centro' de las bandas"
+    )
+    banda_superior: list[float | None] = Field(
+        default_factory=list, description="Fase 30: banda_media + band_n_std * desvío móvil del spread"
+    )
+    banda_inferior: list[float | None] = Field(
+        default_factory=list, description="Fase 30: banda_media - band_n_std * desvío móvil del spread"
+    )
+    kalman_beta: list[float | None] = Field(
+        default_factory=list,
+        description="Fase 30: hedge ratio ESTIMADO DÍA A DÍA por pairs.kalman_hedge.kalman_hedge_ratio (vs. 'beta', el único valor estático de toda la muestra)",
+    )
+    kalman_alpha: list[float | None] = Field(default_factory=list, description="Fase 30: intercepto día a día del mismo filtro de Kalman")
     zscore: list[float | None] = Field(description="Z-score expansivo del spread (pairs.signals.zscore)")
     zscore_actual: float | None = Field(description="Último valor del z-score — qué tan 'estirado' está el spread HOY")
     zscore_interpretacion: str = Field(description="Texto honesto: zona normal vs. extrema (|z|>2), o sin datos suficientes")
@@ -799,7 +823,7 @@ class PairDetailResponse(BaseModel):
         default=None, description="null si no hay historia suficiente para ni una ventana rolling (ver estabilidad_mensaje)"
     )
     estabilidad_mensaje: str | None = Field(default=None, description="Explica por qué 'estabilidad' es null, si aplica")
-    backtest: PairBacktestResult = Field(description="Backtest de la estrategia de reversión sobre este par (Fase 15b)")
+    backtest: PairBacktestResult = Field(description="Backtest de la estrategia de reversión sobre este par (Fase 15b, modo configurable desde Fase 30)")
 
 
 class VolumeProfileResponse(BaseModel):

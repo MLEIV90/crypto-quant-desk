@@ -1298,8 +1298,20 @@ def test_get_pairs_detail_returns_cointegration_spread_and_zscore() -> None:
 
     n = len(body["fechas"])
     assert n > 0
+    assert len(body["ratio"]) == n
     assert len(body["spread"]) == n
+    assert len(body["banda_media"]) == n
+    assert len(body["banda_superior"]) == n
+    assert len(body["banda_inferior"]) == n
+    assert len(body["kalman_beta"]) == n
+    assert len(body["kalman_alpha"]) == n
     assert len(body["zscore"]) == n
+    # el ratio (precio_y/precio_x) no tiene warmup: está definido apenas hay dato.
+    assert body["ratio"][0] is not None
+    # las bandas (Fase 30) sí tienen warmup: recién están definidas a partir
+    # de la ventana `band_window` (30 por defecto).
+    assert body["banda_media"][0] is None
+    assert body["banda_media"][-1] is not None
     # el z-score expansivo tiene warmup en NaN/null al principio de la serie
     assert body["zscore"][0] is None
     assert body["zscore"][-1] is not None
@@ -1316,14 +1328,16 @@ def test_get_pairs_detail_returns_cointegration_spread_and_zscore() -> None:
     for extremo in body["zscore_extremos"]:
         assert abs(extremo["z"]) >= 2.0
 
-    # Fase 15b: backtest del par.
+    # Fase 15b (ampliado en 30): backtest del par.
     backtest = body["backtest"]
+    assert backtest["modo"] == "long_short"  # bt_long_only=False por defecto
     assert len(backtest["fechas"]) == len(backtest["equity_curve"])
     assert len(backtest["fechas"]) > 0
     assert backtest["equity_curve"][0] == pytest.approx(1.0)
     expected_metric_keys = {
         "total_return", "cagr", "ann_vol", "sharpe", "sortino", "max_drawdown", "calmar",
-        "turnover_total", "turnover_medio_diario", "n_trades", "exposicion_media", "hit_rate",
+        "turnover_total", "turnover_medio_diario", "n_trades", "exposicion_media", "pct_tiempo_fuera",
+        "hit_rate",
     }
     assert set(backtest["metrics"].keys()) == expected_metric_keys
 
@@ -1347,6 +1361,75 @@ def test_get_pairs_detail_invalid_backtest_params_returns_400() -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_get_pairs_detail_long_only_uses_rotation_backtest() -> None:
+    response = client.get(
+        "/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "bt_long_only": True}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["backtest"]["modo"] == "long_only"
+    assert "pct_tiempo_fuera" in body["backtest"]["metrics"]
+
+
+def test_get_pairs_detail_stability_threshold_is_adjustable() -> None:
+    # con un umbral bajísimo (0.0), CUALQUIER fracción cointegrada alcanza
+    # -> estable siempre True. Con uno inalcanzable (1.0, salvo el caso
+    # perfecto), estable debería dar False.
+    lenient = client.get(
+        "/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "stability_threshold": 0.0}
+    )
+    strict = client.get(
+        "/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "stability_threshold": 1.0}
+    )
+
+    assert lenient.status_code == 200
+    assert strict.status_code == 200
+    lenient_body = lenient.json()
+    strict_body = strict.json()
+    if lenient_body["estabilidad"] is not None:
+        assert lenient_body["estabilidad"]["estable"] is True
+    if strict_body["estabilidad"] is not None and strict_body["estabilidad"]["fraccion_cointegrada"] < 1.0:
+        assert strict_body["estabilidad"]["estable"] is False
+
+
+def test_get_pairs_detail_invalid_stability_threshold_returns_400() -> None:
+    response = client.get(
+        "/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "stability_threshold": 1.5}
+    )
+
+    assert response.status_code == 400
+
+
+def test_get_pairs_detail_band_params_change_bands() -> None:
+    narrow = client.get(
+        "/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "band_n_std": 1.0}
+    )
+    wide = client.get(
+        "/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "band_n_std": 3.0}
+    )
+
+    assert narrow.status_code == 200
+    assert wide.status_code == 200
+    narrow_body = narrow.json()
+    wide_body = wide.json()
+    # última fecha con bandas definidas en ambas: la banda ANCHA (n_std=3)
+    # debe estar más lejos de la media que la ANGOSTA (n_std=1).
+    idx = len(narrow_body["banda_superior"]) - 1
+    assert narrow_body["banda_superior"][idx] is not None
+    assert wide_body["banda_superior"][idx] is not None
+    assert wide_body["banda_superior"][idx] > narrow_body["banda_superior"][idx]
+
+
+def test_get_pairs_detail_invalid_band_params_return_400() -> None:
+    assert client.get(
+        "/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "band_window": 1}
+    ).status_code == 400
+    assert client.get(
+        "/api/pairs/detail", params={"asset_y": "ETH", "asset_x": "BTC", "band_n_std": 0}
+    ).status_code == 400
 
 
 def test_get_pairs_detail_same_asset_returns_400() -> None:

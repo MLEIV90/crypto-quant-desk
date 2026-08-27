@@ -60,6 +60,15 @@ import pandas as pd
 
 from backtest.engine import run_backtest
 from config import TRANSACTION_COST_BPS
+from metrics.risk_measures import (
+    annualized_return,
+    annualized_volatility,
+    calmar_ratio,
+    equity_curve,
+    max_drawdown,
+    sharpe_ratio,
+    sortino_ratio,
+)
 from pairs.signals import generate_pair_signals
 from signals.returns import simple_returns
 
@@ -143,6 +152,108 @@ def backtest_pair(
         "equity_curve": result.equity_curve,
         "returns": result.returns,
         "metrics": result.metrics,
+        "spread": spread,
+        "zscore": signals_df["z"],
+        "eventos": signals_df["evento"],
+    }
+
+
+def backtest_pair_rotation(
+    y_prices: pd.Series,
+    x_prices: pd.Series,
+    hedge_ratio: float,
+    entry: float = DEFAULT_PAIR_ENTRY,
+    exit: float = DEFAULT_PAIR_EXIT,
+    stop: float = DEFAULT_PAIR_STOP,
+    cost_bps: float = TRANSACTION_COST_BPS,
+) -> dict:
+    """Variante LONG-ONLY ("rotación") de `backtest_pair` — Fase 30: en vez
+    de estar dollar-neutral (largo Y + corto X a la vez), rota el 100% del
+    capital entre Y y X según la misma señal, SIN ir nunca en corto.
+
+    Reutiliza `pairs.signals.generate_pair_signals` sin cambios (misma
+    máquina de estados sobre el z-score del spread, ver su docstring) —
+    solo REINTERPRETA `posicion_spread`:
+    - +1 ("entrada_larga": spread anormalmente bajo, Y barata relativo a X)
+      -> 100% largo Y.
+    - -1 ("entrada_corta": spread anormalmente alto, X barata relativo a Y)
+      -> 100% largo X.
+    - 0 (sin señal, o cerrado) -> 100% afuera (cash, retorno 0 esa pata).
+
+    No se puede reutilizar `backtest.engine.run_backtest` tal cual para
+    esto: esa función multiplica UNA sola serie de retornos por una
+    posición en [-1, 1] (dollar-neutral / long-short sobre un único
+    activo sintético) — acá el activo que genera retorno CAMBIA según la
+    señal (Y o X), no hay un único `asset_returns` fijo. En su lugar, se
+    arma el retorno bruto a mano con la MISMA fórmula de
+    `run_backtest` (`posicion_efectiva = posicion.shift(1)`, anti-lookahead;
+    `turnover = |Δposicion_efectiva|`; costo = `cost_bps/1e4 * turnover`) y
+    las métricas se calculan con las mismas funciones de
+    `metrics.risk_measures` que usa `run_backtest` — el dict devuelto tiene
+    EXACTAMENTE la misma forma que el de `backtest_pair`, para que el
+    frontend no necesite lógica distinta según el modo.
+
+    Lanza `ValueError` en las mismas condiciones que `backtest_pair`
+    (menos de 2 fechas en común entre `y_prices`/`x_prices`, o
+    `entry`/`exit`/`stop` inconsistentes, ver `generate_pair_signals`).
+    """
+    aligned = pd.concat([y_prices.rename("y"), x_prices.rename("x")], axis=1).dropna()
+    if len(aligned) < 2:
+        raise ValueError(
+            "backtest_pair_rotation: se necesitan al menos 2 observaciones alineadas entre "
+            "'y_prices' y 'x_prices'"
+        )
+
+    log_y = np.log(aligned["y"])
+    log_x = np.log(aligned["x"])
+    spread = (log_y - hedge_ratio * log_x).rename("spread")
+
+    signals_df = generate_pair_signals(spread, entry=entry, exit=exit, stop=stop)
+
+    y_returns = simple_returns(aligned["y"])
+    x_returns = simple_returns(aligned["x"])
+    posicion = signals_df["posicion_spread"].reindex(y_returns.index)
+
+    # Misma regla anti-lookahead que `run_backtest`: la señal decidida en t
+    # recién es efectiva en t+1.
+    position_effective = posicion.shift(1).fillna(0.0)
+    peso_y = position_effective.clip(lower=0.0)  # 1.0 cuando la señal es "largo Y"
+    peso_x = (-position_effective).clip(lower=0.0)  # 1.0 cuando la señal es "largo X"
+    turnover = position_effective.diff().fillna(0.0).abs()
+
+    gross_returns = peso_y * y_returns + peso_x * x_returns
+    strategy_returns = (gross_returns - (cost_bps / 1e4) * turnover).rename("strategy_return")
+
+    equity = equity_curve(strategy_returns)
+    sign = np.sign(position_effective)
+    n_trades = int((sign.diff().fillna(0.0) != 0.0).sum())
+
+    metrics: dict[str, float] = {
+        "total_return": float(equity.iloc[-1] - 1.0),
+        "cagr": annualized_return(strategy_returns),
+        "ann_vol": annualized_volatility(strategy_returns),
+        "sharpe": sharpe_ratio(strategy_returns),
+        "sortino": sortino_ratio(strategy_returns),
+        "max_drawdown": max_drawdown(strategy_returns),
+        "calmar": calmar_ratio(strategy_returns),
+        "turnover_total": float(turnover.sum()),
+        "turnover_medio_diario": float(turnover.mean()),
+        "n_trades": n_trades,
+        "exposicion_media": float(position_effective.abs().mean()),
+        "pct_tiempo_fuera": float((position_effective == 0.0).mean()),
+        "hit_rate": float((strategy_returns > 0.0).mean()),
+    }
+
+    logger.info(
+        "backtest_pair_rotation: hedge_ratio=%.4f, entry=%.1f/exit=%.1f/stop=%.1f, sharpe=%.2f, "
+        "total_return=%.2f%%, n_trades=%d",
+        hedge_ratio, entry, exit, stop, metrics["sharpe"], metrics["total_return"] * 100, n_trades,
+    )
+
+    return {
+        "equity_curve": equity,
+        "returns": strategy_returns,
+        "metrics": metrics,
         "spread": spread,
         "zscore": signals_df["z"],
         "eventos": signals_df["evento"],

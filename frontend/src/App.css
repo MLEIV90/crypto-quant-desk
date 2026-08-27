@@ -1545,6 +1545,41 @@
   background: var(--color-text-faint);
 }
 
+/* ---------------------------------------------------------------------
+   Panel de pares — controles configurables (Fase 30): sliders con el
+   valor actual al lado, mismo criterio de layout que .backtest-params.
+   --------------------------------------------------------------------- */
+
+.pair-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: flex-end;
+}
+
+.pair-controls__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-faint);
+  min-width: 180px;
+}
+
+.pair-controls__field-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.pair-controls__slider {
+  accent-color: var(--color-accent);
+  width: 100%;
+}
+
 .zscore-indicator {
   display: flex;
   flex-direction: column;
