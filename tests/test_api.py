@@ -132,6 +132,53 @@ def test_get_ohlcv_invalid_limit_returns_422() -> None:
     assert response.status_code == 422
 
 
+def test_get_ohlcv_long_history_starts_before_2018_for_btc() -> None:
+    # Fase 31: con long_history=true, BTC debe arrancar en su histórico REAL
+    # de CoinMetrics (2010-07-18), no en el snapshot Binance (2018-01-01) NI
+    # en el default de RAW_START_DATE ("2017-01-01") si `_load_long_df` se
+    # olvidara de pasar un `start` explícito más temprano — 2012 es una
+    # cota floja que atrapa ambos bugs sin acoplarse a la fecha exacta.
+    response = client.get(
+        "/api/ohlcv", params={"asset": "BTC", "interval": "1d", "limit": 60_000, "long_history": True}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    primera_fecha = body["velas"][0]["fecha"]
+    assert primera_fecha < "2012-01-01"
+
+
+def test_get_ohlcv_long_history_pre_cutoff_candles_are_close_only() -> None:
+    # Fase 31: CoinMetrics solo reporta cierre — antes del corte, las velas
+    # deben tener open=high=low=close (documentado, no un bug del gráfico).
+    response = client.get(
+        "/api/ohlcv", params={"asset": "BTC", "interval": "1d", "limit": 60_000, "long_history": True}
+    )
+
+    assert response.status_code == 200
+    primera = response.json()["velas"][0]
+    assert primera["fecha"] < "2018-01-01"
+    assert primera["open"] == primera["high"] == primera["low"] == primera["close"]
+
+
+def test_get_ohlcv_without_long_history_still_starts_at_binance_snapshot() -> None:
+    # Regresión (PARTE B): sin long_history, /api/ohlcv sigue devolviendo
+    # exactamente lo mismo que antes de esta fase (snapshot Binance puro).
+    response = client.get("/api/ohlcv", params={"asset": "BTC", "interval": "1d", "limit": 60_000})
+
+    assert response.status_code == 200
+    primera_fecha = response.json()["velas"][0]["fecha"]
+    assert primera_fecha >= "2018-01-01"
+
+
+def test_get_ohlcv_long_history_rejects_non_daily_interval() -> None:
+    response = client.get(
+        "/api/ohlcv", params={"asset": "BTC", "interval": "1h", "limit": 100, "long_history": True}
+    )
+
+    assert response.status_code == 400
+
+
 # --------------------------------------------------------------------------
 # /api/studies
 # --------------------------------------------------------------------------

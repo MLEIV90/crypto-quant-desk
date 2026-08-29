@@ -196,6 +196,18 @@ export const PERIOD_SELECTOR_HELP =
   "Elegí cuánta historia mostrar. 'Todo' trae el histórico completo — en velas horarias eso son unas 58.000 " +
   "velas y puede tardar 1-2 segundos en cargar. Es esperado, no un error.";
 
+// Fase 31: nota honesta sobre la serie de precio LARGA fusionada (solo
+// diario, "todo" el histórico) — CoinMetrics antes de 2018 solo reporta
+// precio de CIERRE, no rango real, así que esas velas no tienen mecha
+// (open=high=low=close). Se muestra solo cuando el gráfico efectivamente
+// tiene datos anteriores a 2018 (no todas las monedas del universo tienen
+// esa cobertura — ver `data/loaders.py::_load_full_history`).
+export const LONG_HISTORY_CLOSE_ONLY_NOTE =
+  "El precio antes de 2018 viene de CoinMetrics y es SOLO DE CIERRE (sin apertura/máximo/mínimo real) — por " +
+  "eso esas velas se ven planas, sin mecha. Desde 2018 en adelante son velas OHLC reales de Binance. Los " +
+  "osciladores/overlays (SMA, RSI, MACD, Bollinger, etc.) siguen calculándose solo sobre el tramo Binance " +
+  "(2018+), porque necesitan rango real — no vas a verlos superpuestos sobre los años más viejos del precio.";
+
 // --------------------------------------------------------------------------
 // Vista "Ciclos y Estadística" (Fase 11, rehecha en Fase 15a) — /api/stats.
 // Mismo criterio de honestidad que el resto: nada de esto predice el

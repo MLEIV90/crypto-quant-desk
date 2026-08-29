@@ -387,3 +387,197 @@ def test_get_prices_raises_when_all_sources_fail(monkeypatch: pytest.MonkeyPatch
 
     with pytest.raises(RuntimeError):
         loaders.get_prices("BTC", source="binance", start="2021-01-01", end="2021-01-03", use_cache=False)
+
+
+# --------------------------------------------------------------------------
+# source="full" (Fase 31): serie de precio larga fusionada CoinMetrics
+# (pre-corte, solo cierre) + Binance/store (desde el corte, OHLC real).
+# --------------------------------------------------------------------------
+
+
+def _write_fake_coinmetrics_snapshot(
+    directory: Path, asset: str, dates: list[str], closes: list[float]
+) -> pd.DataFrame:
+    """Como `_write_fake_snapshot`, pero con la forma que produce
+    `_load_coinmetrics` de verdad: open=high=low=close (solo cierre), sin
+    volumen — y guardado con el nombre que espera `_load_full_history`
+    (`{asset}_coinmetrics_1d.parquet`, NO `{asset}_1d.parquet`).
+    """
+    idx = pd.DatetimeIndex(pd.to_datetime(dates), tz="UTC")
+    df = pd.DataFrame(
+        {"open": closes, "high": closes, "low": closes, "close": closes, "volume": [np.nan] * len(closes)},
+        index=idx,
+    )
+    df.index.name = "timestamp"
+    df.to_parquet(directory / f"{asset}_coinmetrics_1d.parquet")
+    return df
+
+
+def _write_fake_modern_snapshot(
+    directory: Path, asset: str, dates: list[str], closes: list[float]
+) -> pd.DataFrame:
+    """Snapshot "store" (Binance) sintético con OHLC REAL (no degenerado:
+    high > close > low en cada fila) — a diferencia de `_write_fake_snapshot`
+    (que sí usa open=high=low=close por simplicidad), esto permite verificar
+    que `_load_full_history` deja el tramo Binance/store INTACTO, sin
+    aplanarlo.
+    """
+    idx = pd.DatetimeIndex(pd.to_datetime(dates), tz="UTC")
+    opens = [c * 0.995 for c in closes]
+    highs = [c * 1.02 for c in closes]
+    lows = [c * 0.98 for c in closes]
+    df = pd.DataFrame(
+        {"open": opens, "high": highs, "low": lows, "close": closes, "volume": [100.0] * len(closes)},
+        index=idx,
+    )
+    df.index.name = "timestamp"
+    df.to_parquet(directory / f"{asset}_1d.parquet")
+    return df
+
+
+def test_load_full_history_starts_before_the_merge_cutoff_not_at_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    _write_fake_coinmetrics_snapshot(
+        tmp_path, "BTC", ["2015-01-01", "2015-01-02", "2017-12-31"], [100.0, 101.0, 102.0]
+    )
+    _write_fake_modern_snapshot(tmp_path, "BTC", ["2018-01-01", "2018-01-02"], [102.3, 103.0])
+
+    df = loaders._load_full_history("BTC", "1d", "2015-01-01", "2018-01-02")
+
+    # PARTE B: la serie fusionada arranca ANTES del corte, no en 2018.
+    assert df.index.min() == pd.Timestamp("2015-01-01", tz="UTC")
+    assert df.index.min() < pd.Timestamp(loaders.MERGE_CUTOFF_DATE, tz="UTC")
+
+
+def test_load_full_history_seam_has_no_artificial_jump(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    # Último cierre pre-corte y primer cierre post-corte deliberadamente
+    # cercanos (0.3%) — así cualquier salto > 3% en el resultado sería un
+    # artefacto de la FUSIÓN, no una variación real de precio de la fixture.
+    _write_fake_coinmetrics_snapshot(tmp_path, "BTC", ["2017-12-30", "2017-12-31"], [100.0, 100.0])
+    _write_fake_modern_snapshot(tmp_path, "BTC", ["2018-01-01", "2018-01-02"], [100.3, 101.0])
+
+    df = loaders._load_full_history("BTC", "1d", "2017-12-30", "2018-01-02")
+
+    seam_pct_change = df["close"].pct_change().abs()
+    # PARTE B: sin salto de precio > 3% en la costura 2017-12-31 -> 2018-01-01.
+    assert seam_pct_change.loc[pd.Timestamp(loaders.MERGE_CUTOFF_DATE, tz="UTC")] < 0.03
+
+
+def test_load_full_history_no_duplicates_sorted_and_monotonic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    # Fechas fuera de orden a propósito en ambos archivos — `_load_full_history`
+    # debe devolver la serie ordenada igual.
+    _write_fake_coinmetrics_snapshot(
+        tmp_path, "BTC", ["2017-12-31", "2015-01-01", "2016-06-15"], [102.0, 100.0, 101.0]
+    )
+    _write_fake_modern_snapshot(tmp_path, "BTC", ["2018-01-02", "2018-01-01"], [103.0, 102.3])
+
+    df = loaders._load_full_history("BTC", "1d", "2015-01-01", "2018-01-02")
+
+    # PARTE B: sin fechas duplicadas, serie ordenada y monótona en el tiempo.
+    assert not df.index.duplicated().any()
+    assert df.index.is_monotonic_increasing
+    assert len(df) == 5
+
+
+def test_load_full_history_pre_cutoff_candles_are_close_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    _write_fake_coinmetrics_snapshot(tmp_path, "BTC", ["2015-01-01", "2017-12-31"], [100.0, 102.0])
+    _write_fake_modern_snapshot(tmp_path, "BTC", ["2018-01-01"], [102.3])
+
+    df = loaders._load_full_history("BTC", "1d", "2015-01-01", "2018-01-01")
+
+    pre_cutoff = df.loc[df.index < pd.Timestamp(loaders.MERGE_CUTOFF_DATE, tz="UTC")]
+    post_cutoff = df.loc[df.index >= pd.Timestamp(loaders.MERGE_CUTOFF_DATE, tz="UTC")]
+
+    # PARTE B: las velas pre-2018 tienen open=high=low=close (son solo cierre).
+    assert (pre_cutoff["open"] == pre_cutoff["close"]).all()
+    assert (pre_cutoff["high"] == pre_cutoff["close"]).all()
+    assert (pre_cutoff["low"] == pre_cutoff["close"]).all()
+    # El tramo Binance/store, en cambio, NO debe aplanarse (OHLC real intacto).
+    assert (post_cutoff["high"] > post_cutoff["close"]).all()
+    assert (post_cutoff["low"] < post_cutoff["close"]).all()
+
+
+def test_load_full_history_degrades_gracefully_without_coinmetrics_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Sin '{asset}_coinmetrics_1d.parquet' (p. ej. SOL, sin cobertura
+    # pre-2018) — debe devolver solo el tramo Binance/store, sin error.
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    _write_fake_modern_snapshot(tmp_path, "SOL", ["2018-01-01", "2018-01-02"], [10.0, 10.5])
+
+    df = loaders._load_full_history("SOL", "1d", "2015-01-01", "2018-01-02")
+
+    assert len(df) == 2
+    assert df.index.min() == pd.Timestamp("2018-01-01", tz="UTC")
+
+
+def test_load_full_history_raises_for_non_daily_interval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+
+    with pytest.raises(ValueError, match="1d"):
+        loaders._load_full_history("BTC", "1h", "2015-01-01", "2018-01-02")
+
+
+def test_get_prices_source_full_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    _write_fake_coinmetrics_snapshot(tmp_path, "BTC", ["2015-01-01", "2017-12-31"], [100.0, 102.0])
+    _write_fake_modern_snapshot(tmp_path, "BTC", ["2018-01-01", "2018-01-02"], [102.3, 103.0])
+
+    out = loaders.get_prices(
+        "BTC", source="full", interval="1d", start="2015-01-01", end="2018-01-02", use_cache=False
+    )
+
+    assert list(out.columns) == loaders.STANDARD_COLUMNS
+    assert len(out) == 4
+    assert out.index.tz is not None
+    assert out.index.is_monotonic_increasing
+    assert not out.index.duplicated().any()
+    assert out.index.min() == pd.Timestamp("2015-01-01", tz="UTC")
+
+
+def test_get_prices_source_store_unaffected_by_coinmetrics_snapshot_presence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PARTE B: source='store' (Binance) sigue devolviendo lo mismo que
+    antes de esta fase, incluso si el snapshot CoinMetrics pre-corte
+    también existe en el mismo directorio — no debe filtrarse ni mezclarse.
+    """
+    monkeypatch.setattr(loaders, "SNAPSHOT_DIR", tmp_path)
+    _write_fake_coinmetrics_snapshot(tmp_path, "BTC", ["2015-01-01", "2017-12-31"], [100.0, 102.0])
+    modern = _write_fake_modern_snapshot(tmp_path, "BTC", ["2018-01-01", "2018-01-02"], [102.3, 103.0])
+
+    out = loaders.get_prices("BTC", source="store", start="2018-01-01", end="2018-01-02", use_cache=False)
+
+    assert len(out) == 2
+    assert out.index.min() == pd.Timestamp("2018-01-01", tz="UTC")
+    pd.testing.assert_series_equal(out["close"], modern["close"], check_names=False)
+
+
+# --------------------------------------------------------------------------
+# Validación con datos REALES (Fase 31) — se salta si no se corrió
+# `scripts/export_coinmetrics_history.py` localmente (data/snapshot/ está
+# en .gitignore, no se versiona ni se comparte entre máquinas/CI).
+# --------------------------------------------------------------------------
+
+
+def test_real_btc_coinmetrics_history_starts_around_2010_2011() -> None:
+    from config import SNAPSHOT_DIR as REAL_SNAPSHOT_DIR
+
+    path = REAL_SNAPSHOT_DIR / "BTC_coinmetrics_1d.parquet"
+    if not path.exists():
+        pytest.skip(
+            f"'{path}' no existe — corré 'python scripts/export_coinmetrics_history.py' para "
+            "generarlo y validar esto con datos reales."
+        )
+
+    df = pd.read_parquet(path)
+    assert pd.Timestamp("2010-01-01", tz="UTC") <= df.index.min() < pd.Timestamp("2012-01-01", tz="UTC")

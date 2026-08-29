@@ -50,6 +50,26 @@ BACKOFF_BASE_SECONDS = 1.0
 BINANCE_MAX_CANDLES = 1000
 HTTP_TIMEOUT_SECONDS = 30
 
+# Fase 31: fecha de corte de la fusión CoinMetrics + Binance para
+# source="full" (ver `_load_full_history`) — VALIDADA manualmente
+# comparando ambas fuentes en los 3065 días de solapamiento (2018+):
+# diferencia absoluta media 0.26%, mediana 0.01%, empalme de enero 2018
+# dentro de 0.2-0.6%. Con esa diferencia, un empalme DIRECTO (sin escalar
+# ni promediar en la costura) es seguro: Binance manda desde esta fecha
+# (es el exchange que efectivamente se opera), CoinMetrics cubre todo lo
+# anterior.
+MERGE_CUTOFF_DATE: str = "2018-01-01"
+
+# Fecha de inicio a pedir cuando se quiere el histórico COMPLETO fusionado
+# (source="full") sin recortar por accidente: el default de `get_prices`
+# cuando no se pasa `start` es `config.RAW_START_DATE` ("2017-01-01") —
+# posterior al arranque real de CoinMetrics para varios activos (BTC:
+# 2010-07-18, ETH: 2015-08-08, LTC: 2013-04-01). Cualquier caller de
+# source="full" que quiera "todo" debe pasar ESTA fecha como `start`
+# explícito (anterior al génesis de cualquier moneda del universo), no
+# omitirlo.
+FULL_HISTORY_START_DATE: str = "2009-01-01"
+
 # Duración de una vela de Binance en milisegundos, usada para paginar.
 _BINANCE_INTERVAL_MS: dict[str, int] = {
     "1m": 60_000,
@@ -111,10 +131,15 @@ def get_prices(
     asset:
         Ticker interno definido en `config.UNIVERSE` (p. ej. "BTC").
     source:
-        Fuente primaria a intentar ("binance", "coinmetrics", "coingecko", o
+        Fuente primaria a intentar ("binance", "coinmetrics", "coingecko",
         "store" para leer un snapshot local ya exportado por
-        `scripts/export_snapshot.py` desde `config.SNAPSHOT_DIR`, útil para
-        verificar el pipeline offline con un dataset ya compartido).
+        `scripts/export_snapshot.py` desde `config.SNAPSHOT_DIR` (útil para
+        verificar el pipeline offline con un dataset ya compartido), o
+        "full" (Fase 31) para la serie de precio LARGA fusionada
+        CoinMetrics (pre-2018, solo cierre) + Binance/store (2018+, OHLC
+        real) — pensada EXCLUSIVAMENTE para graficar precio de largo plazo,
+        ver `_load_full_history`. NO usar "full" para GARCH ni ningún
+        cálculo que necesite OHLC real en todo el rango.
     interval:
         Intervalo de las velas (p. ej. "1d"). Ver `config.DEFAULT_INTERVAL`.
     start, end:
@@ -148,9 +173,11 @@ def get_prices(
     # cualquier llamada futura con `source="store"` que no pase
     # `use_cache=False` explícito — como pasaba con `pairs.cointegration`/
     # `pairs.stability`, que llaman `get_prices(source="store")` sin ese
-    # flag.
+    # flag. "full" (Fase 31) tiene el MISMO problema por la MISMA razón:
+    # internamente lee "store" más un snapshot local propio
+    # (`_load_full_history`), ningún paso pega a la red.
     cache_path = _cache_path(asset, source, interval)
-    if use_cache and source != "store" and cache_path.exists():
+    if use_cache and source not in ("store", "full") and cache_path.exists():
         df = _read_cache(cache_path)
         return _slice(df, start, end)
 
@@ -166,7 +193,7 @@ def get_prices(
             last_exc = exc
             continue
 
-        if use_cache and src != "store":
+        if use_cache and src not in ("store", "full"):
             _write_cache(df, _cache_path(asset, src, interval))
         return _slice(df, start, end)
 
@@ -185,6 +212,8 @@ def _load_from_source(asset: str, source: str, interval: str, start: str, end: s
         # No usa config.UNIVERSE: el snapshot se nombra con el ticker interno
         # directamente (ver scripts/export_snapshot.py), no con un símbolo de exchange.
         return _load_store(asset, interval, start, end)
+    if source == "full":
+        return _load_full_history(asset, interval, start, end)
 
     symbols = UNIVERSE[asset]
     if source not in symbols:
@@ -396,6 +425,71 @@ def _load_store(asset: str, interval: str, start: str, end: str) -> pd.DataFrame
     start_ts = pd.Timestamp(start, tz="UTC")
     end_ts = pd.Timestamp(end, tz="UTC")
     return df.loc[(df.index >= start_ts) & (df.index <= end_ts)]
+
+
+def _load_full_history(asset: str, interval: str, start: str, end: str) -> pd.DataFrame:
+    """Serie de precio LARGA fusionada (Fase 31): CoinMetrics (pre-`MERGE_CUTOFF_DATE`,
+    solo cierre) + Binance/store (desde esa fecha, OHLC real).
+
+    Pensada EXCLUSIVAMENTE para el GRÁFICO de precio de largo plazo (p. ej.
+    "Todo" el histórico de Análisis Técnico). NO usar para GARCH ni ningún
+    cálculo que necesite OHLC real en todo el rango: el tramo pre-corte
+    tiene open=high=low=close (ver docstring de `_load_coinmetrics`) —
+    eso distorsionaría cualquier métrica que dependa del rango intradiario
+    (true range, ATR, estocástico, Ichimoku, GARCH sobre retornos
+    intradía, etc.). `get_prices(..., source="store")` (Binance puro,
+    desde `MERGE_CUTOFF_DATE`) sigue siendo la fuente para esos cálculos,
+    sin ningún cambio.
+
+    REGLA DE FUSIÓN (validada manualmente, ver `MERGE_CUTOFF_DATE`):
+    empalme DIRECTO en la fecha de corte, sin escalar ni promediar en la
+    costura — Binance tiene prioridad absoluta desde esa fecha, CoinMetrics
+    cubre todo lo anterior.
+
+    Requiere `interval="1d"`: CoinMetrics Community solo publica precio
+    DIARIO — no tiene sentido pedir esta fuente en horario ni en ningún
+    intervalo derivado por resampleo.
+
+    El tramo pre-corte se lee de un snapshot local ya exportado por
+    `scripts/export_coinmetrics_history.py`
+    (`SNAPSHOT_DIR/{asset}_coinmetrics_1d.parquet`) — NO pega a la red acá
+    (mismo criterio offline-first que `_load_store`). Si ese snapshot no
+    existe para `asset` (p. ej. SOL, sin cobertura de CoinMetrics Community
+    anterior a `MERGE_CUTOFF_DATE` porque la red ni existía — ver el
+    script), degrada con gracia: devuelve solo el tramo Binance/store desde
+    `MERGE_CUTOFF_DATE`, sin lanzar error.
+    """
+    if interval != "1d":
+        raise ValueError(
+            f"source='full' (histórico largo fusionado) solo soporta interval='1d', recibido '{interval}' "
+            "— CoinMetrics Community solo publica precio diario"
+        )
+
+    cutoff = pd.Timestamp(MERGE_CUTOFF_DATE, tz="UTC")
+    start_ts = pd.Timestamp(start, tz="UTC")
+
+    modern_start = max(start_ts, cutoff).strftime("%Y-%m-%d")
+    modern = _load_store(asset, interval, modern_start, end)
+
+    historic_path = SNAPSHOT_DIR / f"{asset}_coinmetrics_1d.parquet"
+    if not historic_path.exists():
+        logger.info(
+            "_load_full_history: sin snapshot CoinMetrics pre-%s para '%s' ('%s' no existe) — se "
+            "devuelve solo el tramo Binance/store. Corré 'python scripts/export_coinmetrics_history.py' "
+            "para generarlo si esa moneda tiene cobertura.",
+            MERGE_CUTOFF_DATE, asset, historic_path,
+        )
+        return modern
+
+    historic = pd.read_parquet(historic_path)
+    if historic.index.tz is None:
+        historic.index = historic.index.tz_localize("UTC")
+    else:
+        historic.index = historic.index.tz_convert("UTC")
+    historic = historic.loc[(historic.index >= start_ts) & (historic.index < cutoff)]
+
+    combined = pd.concat([historic, modern])
+    return combined[~combined.index.duplicated(keep="last")].sort_index()
 
 
 def _load_csv(path: str | Path) -> pd.DataFrame:

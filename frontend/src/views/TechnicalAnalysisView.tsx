@@ -28,6 +28,17 @@
  * el DIBUJO por defecto (ver `../downsample.ts`). El checkbox "Vista
  * completa" de acá abajo (solo visible por encima del umbral) lo desactiva
  * para quien prefiera resolución total a costa de más lag de render.
+ *
+ * Fase 31: `DEFAULT_PERIOD` pasó de "3M" a "todo" (hallazgo A3-01, ver
+ * `PeriodSelector.tsx`) y, para diario, "todo" ahora pide la serie de
+ * precio LARGA fusionada CoinMetrics+Binance (`long_history=true` en
+ * `/api/ohlcv`, ver `data/loaders.py::_load_full_history`) — el gráfico de
+ * precio de BTC arranca en 2010-2011 en vez de 2018. SOLO el precio: los
+ * osciladores/overlays de `/api/studies` (SMA, RSI, MACD, Bollinger, etc.)
+ * siguen calculándose exclusivamente sobre Binance (desde 2018) porque
+ * dependen de OHLC real, que CoinMetrics no tiene antes de esa fecha — por
+ * eso no van a aparecer superpuestos sobre los años más viejos del precio,
+ * a propósito, no es un bug.
  */
 
 import { useCallback, useState } from "react";
@@ -45,6 +56,7 @@ import { candleLimitForPeriod, DEFAULT_PERIOD, PeriodSelector, type PeriodKey } 
 import { DEFAULT_ACTIVE_OVERLAYS, StudyToggles, type OverlayKey } from "../components/StudyToggles";
 import { SuggesterPanel } from "../components/SuggesterPanel";
 import { StatusMessage } from "../components/StatusMessage";
+import { LONG_HISTORY_CLOSE_ONLY_NOTE } from "../helpTexts";
 
 function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
   const next = new Set(set);
@@ -70,6 +82,11 @@ export function TechnicalAnalysisView({ asset, interval, assets, onAlertTriggere
   );
   const [period, setPeriod] = useState<PeriodKey>(DEFAULT_PERIOD);
   const candleLimit = candleLimitForPeriod(period, interval);
+  // Fase 31: la serie larga fusionada solo existe en diario ("full" en
+  // data/loaders.py exige interval="1d", CoinMetrics no tiene horario) —
+  // en cualquier otro período/intervalo, el precio sigue siendo Binance
+  // puro (source="store"), igual que antes de esta fase.
+  const useLongHistory = period === "todo" && interval === "1d";
   const [chartType, setChartType] = useState<ChartTypeKey>(DEFAULT_CHART_TYPE);
   const [disableDownsample, setDisableDownsample] = useState(false);
   const [chartApi, setChartApi] = useState<{
@@ -85,8 +102,8 @@ export function TechnicalAnalysisView({ asset, interval, assets, onAlertTriggere
   );
 
   const ohlcvQuery = useQuery({
-    queryKey: ["ohlcv", asset, interval, candleLimit],
-    queryFn: () => getOhlcv(asset, interval, candleLimit),
+    queryKey: ["ohlcv", asset, interval, candleLimit, useLongHistory],
+    queryFn: () => getOhlcv(asset, interval, candleLimit, useLongHistory),
   });
   const studiesQuery = useQuery({
     queryKey: ["studies", asset, interval, candleLimit],
@@ -108,6 +125,13 @@ export function TechnicalAnalysisView({ asset, interval, assets, onAlertTriggere
   const studies = studiesQuery.data;
   const suggester = suggesterQuery.data;
   const volumeProfile = volumeProfileQuery.data;
+
+  // Fase 31: solo mostrar la nota de "solo cierre pre-2018" cuando el
+  // gráfico efectivamente trae velas de antes de esa fecha — no todas las
+  // monedas del universo tienen cobertura de CoinMetrics tan atrás (p. ej.
+  // SOL), mostrar la nota igual sería ruido sin sentido en esos casos.
+  const showLongHistoryNote =
+    useLongHistory && !!ohlcv && ohlcv.velas.length > 0 && ohlcv.velas[0].fecha < "2018-01-01";
 
   const isLoading = ohlcvQuery.isLoading || studiesQuery.isLoading;
   const error = ohlcvQuery.error ?? studiesQuery.error;
@@ -149,6 +173,7 @@ export function TechnicalAnalysisView({ asset, interval, assets, onAlertTriggere
                 queryKey={["export-ohlcv-csv", asset, interval, candleLimit]}
               />
             </div>
+            {showLongHistoryNote && <p className="view-note">{LONG_HISTORY_CLOSE_ONLY_NOTE}</p>}
             <DrawingTools
               asset={asset}
               interval={interval}

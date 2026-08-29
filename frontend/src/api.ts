@@ -129,8 +129,18 @@ export function getAssets(): Promise<AssetsResponse> {
   return apiGet<AssetsResponse>("/api/assets");
 }
 
-export function getOhlcv(asset: string, interval: string, limit: number): Promise<OHLCVResponse> {
-  return apiGet<OHLCVResponse>("/api/ohlcv", { asset, interval, limit });
+/** `longHistory` (Fase 31, opcional): serie de precio LARGA fusionada
+ * (CoinMetrics pre-2018, solo cierre, + Binance desde 2018, OHLC real) en
+ * vez del snapshot Binance puro — solo tiene efecto con `interval="1d"`.
+ * Pensado EXCLUSIVAMENTE para el gráfico de precio, nunca para `/api/studies`.
+ */
+export function getOhlcv(
+  asset: string,
+  interval: string,
+  limit: number,
+  longHistory: boolean = false,
+): Promise<OHLCVResponse> {
+  return apiGet<OHLCVResponse>("/api/ohlcv", { asset, interval, limit, long_history: longHistory });
 }
 
 export function getStudies(asset: string, interval: string, limit: number): Promise<StudiesResponse> {

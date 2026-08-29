@@ -105,7 +105,7 @@ from api.models import (
 )
 from backtest.engine import backtest_from_prices, compare_to_buy_and_hold
 from config import BASE_DIR, PERIODS_PER_YEAR, TARGET_VOL, TRANSACTION_COST_BPS, UNIVERSE, VOL_WINDOW
-from data.loaders import RESAMPLED_INTERVALS, get_prices
+from data.loaders import FULL_HISTORY_START_DATE, MERGE_CUTOFF_DATE, RESAMPLED_INTERVALS, get_prices
 from data.snapshot import GeoblockedError, last_closed_candle_open_time, update_snapshot
 from eda.eda_report import DEFAULT_ROLLING_CORRELATION_WINDOW, adf_test, correlation_matrix, rolling_pairwise_correlation
 from metrics.risk_measures import (
@@ -366,6 +366,38 @@ def _load_df(asset: str, interval: str) -> pd.DataFrame:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+def _load_long_df(asset: str, interval: str) -> pd.DataFrame:
+    """Como `_load_df`, pero con la serie de precio LARGA fusionada (Fase
+    31: `data.loaders.get_prices(source="full")`) en vez de `source="store"`
+    — CoinMetrics pre-`MERGE_CUTOFF_DATE` (solo cierre) + Binance desde esa
+    fecha (OHLC real). Pensada EXCLUSIVAMENTE para `GET /api/ohlcv` con
+    `long_history=true` (el gráfico de precio de largo plazo) — nunca para
+    `/api/studies` ni ningún otro endpoint que calcule sobre OHLC real (ver
+    docstring de `data.loaders._load_full_history`).
+    """
+    _validate_asset(asset)
+    _validate_interval(interval)
+    if interval != "1d":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"long_history solo soporta interval='1d' (CoinMetrics Community es diario, la fusión "
+                f"con Binance/store empalma en {MERGE_CUTOFF_DATE})"
+            ),
+        )
+    tomorrow = (pd.Timestamp.now(tz="UTC") + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        # `start` explícito (Fase 31): el default de `get_prices` sin `start`
+        # es `config.RAW_START_DATE` ("2017-01-01"), posterior al arranque
+        # real de CoinMetrics para BTC/ETH/LTC — sin esto, "todo el
+        # histórico" quedaría recortado en silencio a 2017 en vez de 2010.
+        return get_prices(
+            asset, source="full", interval=interval, start=FULL_HISTORY_START_DATE, end=tomorrow, use_cache=False
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 def _csv_response(df: pd.DataFrame, filename: str, *, index: bool = False) -> Response:
     """Serializa `df` a CSV (`pandas.DataFrame.to_csv`, sin reimplementar
     ningún formateo propio) y lo envuelve en una respuesta descargable —
@@ -516,6 +548,14 @@ def get_ohlcv(
     limit: int = Query(
         500, gt=0, le=MAX_CANDLE_LIMIT, description="Cantidad de velas más recientes a devolver"
     ),
+    long_history: bool = Query(
+        False,
+        description=(
+            "Fase 31: si es True, usa la serie de precio LARGA fusionada "
+            "(CoinMetrics pre-2018, solo cierre, + Binance desde 2018, OHLC "
+            "real) en vez del snapshot Binance puro — solo interval='1d'."
+        ),
+    ),
 ) -> OHLCVResponse:
     """Reutiliza `data.loaders.get_prices` tal cual; solo recorta a las
     últimas `limit` velas y serializa a JSON.
@@ -525,8 +565,15 @@ def get_ohlcv(
     para pedir la historia COMPLETA de cualquier activo/intervalo (el
     frontend, `PeriodSelector.tsx`, ya no necesita acotar "Todo" a un
     número arbitrario menor al histórico real).
+
+    `long_history` (Fase 31): pensado EXCLUSIVAMENTE para el gráfico de
+    precio de Análisis Técnico en período "Todo" — las velas anteriores a
+    `data.loaders.MERGE_CUTOFF_DATE` (2018-01-01) tienen open=high=low=close
+    (CoinMetrics solo reporta cierre, ver `_load_long_df`). NUNCA afecta
+    `/api/studies` ni ningún otro cálculo: esos siguen usando
+    exclusivamente Binance (`_load_df`), sin cambios.
     """
-    df = _load_df(asset, interval)
+    df = _load_long_df(asset, interval) if long_history else _load_df(asset, interval)
     recent = df.tail(limit)
 
     velas = [

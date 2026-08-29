@@ -25,7 +25,16 @@ import { PERIOD_SELECTOR_HELP } from "../helpTexts";
 
 export type PeriodKey = "1W" | "1M" | "3M" | "6M" | "1A" | "3A" | "todo";
 
-export const DEFAULT_PERIOD: PeriodKey = "3M";
+// Fase 31 (hallazgo A3-01): antes "3M" — las vistas de análisis arrancaban
+// mostrando solo 3 meses, ocultando en silencio la mayoría del histórico
+// disponible (para BTC, hasta 16 años con la serie larga fusionada de
+// CoinMetrics+Binance, ver `data/loaders.py::MERGE_CUTOFF_DATE`) sin que el
+// usuario lo notara a menos que supiera tocar el selector. Se cambia el
+// default COMPARTIDO a "todo" para las 4 vistas que lo usan (Análisis
+// Técnico, Comparación, Arbitraje, Correlación): mostrar de más nunca
+// esconde información, mostrar de menos sí — y el usuario siempre puede
+// acotar el período a mano si prefiere una ventana más corta.
+export const DEFAULT_PERIOD: PeriodKey = "todo";
 
 const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
   { key: "1W", label: "1W" },
