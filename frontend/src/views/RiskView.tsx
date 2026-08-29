@@ -13,6 +13,15 @@
  * Análisis Técnico, porque esta vista siempre opera en diario), default
  * "Todo" para que se vea el histórico completo junto a la volatilidad
  * GARCH (que ya se grafica entera, sin límite, más abajo).
+ *
+ * Fase 32 (hallazgo A4-01): esta tarjeta rotula "(GARCH)" explícitamente —
+ * `RiskSummaryTable.tsx` (la tabla de las 5 monedas de más arriba) calcula
+ * el mismo concepto de "régimen" sobre volatilidad REALIZADA, no GARCH, y
+ * rotula "(vol. realizada)". Ambos métodos usan la MISMA base temporal
+ * (`api/main.py::RISK_ROLLING_WINDOW_LABEL`, último año/365 días vía
+ * `models.garch.volatility_regime(lookback=PERIODS_PER_YEAR)` en los dos
+ * casos) — si alguna vez difieren para el mismo activo, es porque son dos
+ * LENTES distintas sobre la volatilidad, no un error de cálculo.
  */
 
 import { useState } from "react";
@@ -150,7 +159,7 @@ export function RiskView({ asset, onAssetChange }: RiskViewProps) {
               subtextColor={percentileDescriptor(risk.percentiles.vol_garch, risk.percentiles.base).color}
             />
             <MetricCard
-              label="Régimen de volatilidad"
+              label="Régimen de volatilidad (GARCH)"
               value={risk.regimen ? risk.regimen.toUpperCase() : "—"}
               valueColor={risk.regimen ? REGIME_COLORS[risk.regimen] : undefined}
               help={`${RISK_METRIC_HELP.regimen} Base: ${risk.regimen_basis}.`}

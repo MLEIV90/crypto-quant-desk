@@ -1580,6 +1580,87 @@
   width: 100%;
 }
 
+/* ---------------------------------------------------------------------
+   Panel de estabilidad + umbral (Fase 32, hallazgo A3-02): la fracción
+   cointegrada del par, el umbral elegido y el veredicto viven JUNTOS acá
+   — antes el slider estaba suelto, lejos de la métrica que afecta, y
+   moverlo no daba ninguna señal visual clara de qué estaba cambiando.
+   --------------------------------------------------------------------- */
+
+.stability-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel-background);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.stability-panel__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.stability-panel__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stability-panel__verdict-badge {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.stability-panel__verdict-line {
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Variante más grande de `.pair-threshold-cell` (Fase 28, screening table)
+   para usarla suelta en este panel en vez de adentro de una celda de tabla. */
+.pair-threshold-cell--large {
+  min-width: unset;
+  gap: 6px;
+}
+
+.pair-threshold-cell--large .pair-threshold-cell__label {
+  font-size: 0.92rem;
+}
+
+.pair-threshold-cell--large .pair-threshold-cell__track {
+  height: 18px;
+}
+
+.pair-threshold-cell--large .pair-threshold-cell__threshold-marker {
+  top: -5px;
+  bottom: -5px;
+  width: 3px;
+}
+
+.pair-threshold-cell--large .pair-threshold-cell__threshold-label {
+  position: absolute;
+  top: -20px;
+  transform: translateX(-50%);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
 .zscore-indicator {
   display: flex;
   flex-direction: column;

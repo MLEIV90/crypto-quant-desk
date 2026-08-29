@@ -53,6 +53,7 @@ import {
   ARBITRAGE_SCATTER_NOISE_NOTE,
   ARBITRAGE_SCREENING_HELP,
   ARBITRAGE_STABILITY_THRESHOLD_HELP,
+  ARBITRAGE_STABILITY_THRESHOLD_ONE_LINER,
   ARBITRAGE_ZSCORE_EXTREMES_HELP,
   ARBITRAGE_ZSCORE_ZONES_HELP,
 } from "../helpTexts";
@@ -663,42 +664,84 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
                   : undefined
               }
             />
-            <MetricCard
-              label="% ventanas cointegradas"
-              value={detail.estabilidad ? formatPercent(detail.estabilidad.fraccion_cointegrada) : "Sin dato"}
-              help={ARBITRAGE_CONCEPTS_HELP.estabilidad}
-              valueColor={
-                detail.estabilidad
-                  ? detail.estabilidad.fraccion_cointegrada >= stabilityThreshold
-                    ? COLORS.success
-                    : COLORS.danger
-                  : undefined
-              }
-              subtext={
-                detail.estabilidad
-                  ? detail.estabilidad.fraccion_cointegrada >= stabilityThreshold
-                    ? `≥ ${stabilityThresholdPct}%: cumple TU criterio`
-                    : `necesita ≥ ${stabilityThresholdPct}% (TU criterio) para considerarse operable`
-                  : undefined
-              }
-              subtextColor={
-                detail.estabilidad && detail.estabilidad.fraccion_cointegrada < stabilityThreshold
-                  ? COLORS.danger
-                  : undefined
-              }
-            />
-            <MetricCard
-              label={`Veredicto (con TU umbral de ${stabilityThresholdPct}%)`}
-              value={noEstable ? "NO operable" : "Operable"}
-              valueColor={noEstable ? COLORS.danger : COLORS.success}
-            />
           </div>
-          {detail.estabilidad_mensaje && <p className="view-note">{detail.estabilidad_mensaje}</p>}
 
-          <div className="pair-controls">
+          {/* Fase 32 (hallazgo A3-02): el umbral de estabilidad, la fracción
+              cointegrada de ESTE par y el veredicto viven todos JUNTOS acá —
+              antes el slider estaba suelto varios elementos más abajo, lejos
+              de la métrica que en realidad controla, y no había ningún texto
+              que dijera "por qué" el veredicto cambia o no al moverlo. */}
+          <div className="stability-panel">
+            <div className="stability-panel__header">
+              <h4 className="stability-panel__title">
+                Estabilidad y umbral operable
+                <InfoTooltip text={ARBITRAGE_STABILITY_THRESHOLD_HELP} placement="bottom" />
+              </h4>
+              <span
+                className="stability-panel__verdict-badge"
+                style={{ color: noEstable ? COLORS.danger : COLORS.success }}
+              >
+                {noEstable ? "NO operable" : "Operable"}
+              </span>
+            </div>
+
+            <p className="view-note">{ARBITRAGE_STABILITY_THRESHOLD_ONE_LINER}</p>
+
+            {detail.estabilidad ? (
+              <>
+                <div className="pair-threshold-cell pair-threshold-cell--large">
+                  <span className="pair-threshold-cell__label">
+                    <span>
+                      Este par cointegra{" "}
+                      <strong
+                        style={{
+                          color: detail.estabilidad.fraccion_cointegrada >= stabilityThreshold ? COLORS.success : COLORS.danger,
+                        }}
+                      >
+                        {formatPercent(detail.estabilidad.fraccion_cointegrada)}
+                      </strong>{" "}
+                      de las ventanas
+                    </span>
+                    <span className="pair-threshold-cell__target">tu umbral: {stabilityThresholdPct}%</span>
+                  </span>
+                  <div className="pair-threshold-cell__track">
+                    <div
+                      className="pair-threshold-cell__fill"
+                      style={{
+                        width: `${Math.min(100, detail.estabilidad.fraccion_cointegrada * 100)}%`,
+                        background:
+                          detail.estabilidad.fraccion_cointegrada >= stabilityThreshold ? COLORS.success : COLORS.danger,
+                      }}
+                    />
+                    <div
+                      className="pair-threshold-cell__threshold-marker"
+                      style={{ left: `${stabilityThresholdPct}%` }}
+                    />
+                    <span
+                      className="pair-threshold-cell__threshold-label"
+                      style={{ left: `${stabilityThresholdPct}%` }}
+                    >
+                      tu umbral
+                    </span>
+                  </div>
+                </div>
+
+                <p className="stability-panel__verdict-line">
+                  {formatPercent(detail.estabilidad.fraccion_cointegrada)}{" "}
+                  {detail.estabilidad.fraccion_cointegrada >= stabilityThreshold ? "≥" : "<"} {stabilityThresholdPct}%
+                  {" → "}
+                  <strong style={{ color: noEstable ? COLORS.danger : COLORS.success }}>
+                    {noEstable ? "NO operable" : "operable"}
+                  </strong>
+                </p>
+              </>
+            ) : (
+              <p className="view-note">{detail.estabilidad_mensaje ?? "Sin dato de estabilidad rolling."}</p>
+            )}
+
             <label className="pair-controls__field">
               Umbral de estabilidad (% ventanas cointegradas)
-              <span className="pair-controls__field-value">{stabilityThresholdPct}%</span>
+              <span className="pair-controls__field-value">Umbral: {stabilityThresholdPct}%</span>
               <input
                 type="range"
                 className="pair-controls__slider"
@@ -708,7 +751,6 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
                 value={stabilityThreshold}
                 onChange={(event) => setStabilityThreshold(Number(event.target.value))}
               />
-              <InfoTooltip text={ARBITRAGE_STABILITY_THRESHOLD_HELP} placement="bottom" />
             </label>
           </div>
 

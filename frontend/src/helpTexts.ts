@@ -566,6 +566,15 @@ export const ARBITRAGE_STABILITY_THRESHOLD_HELP =
   "para ser más exigente (menos pares pasan el filtro) o bajalo para ser más permisivo — el veredicto de " +
   "abajo se recalcula con el número que elijas, no con uno fijo escondido en el backend.";
 
+// Fase 32 (hallazgo A3-02): versión de UNA LÍNEA de lo mismo, siempre
+// visible junto al slider (no solo en el tooltip) — para pares cuya
+// fracción cointegrada queda lejos del rango donde se mueve el umbral
+// (p. ej. 28%, con el slider recorriendo 0-100%), mover el slider sin
+// ningún texto que explique la comparación se siente "roto" aunque el
+// número técnicamente sí cambie.
+export const ARBITRAGE_STABILITY_THRESHOLD_ONE_LINER =
+  "Elegí qué tan estricto ser: un par se considera operable si cointegra en al menos este % de las ventanas.";
+
 export const ARBITRAGE_LONG_ONLY_HELP =
   "LONG-SHORT (clásico): dollar-neutral — largo $1 de Y y corto beta dólares de X a la vez, apostando pura y " +
   "exclusivamente a que el SPREAD revierta, sin importar hacia dónde vaya el mercado en general. LONG-ONLY " +

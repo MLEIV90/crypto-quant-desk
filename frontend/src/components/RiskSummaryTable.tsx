@@ -7,6 +7,13 @@
  * vista — útil para comparar entre monedas de un vistazo, no para
  * reemplazar el detalle GARCH del activo seleccionado (ver
  * `RISK_SUMMARY_HELP` para la explicación honesta de esa diferencia).
+ *
+ * Fase 32 (hallazgo A4-01): el encabezado de la columna dice explícitamente
+ * "(vol. realizada)" — sin esa etiqueta, un mismo activo podía mostrar acá
+ * un régimen distinto al de la tarjeta de detalle (que usa GARCH, ver
+ * `RiskView.tsx`) sin que quedara claro que son dos MÉTODOS distintos, no
+ * un error. Ambos usan la misma base temporal (último año, 365 días) — solo
+ * difieren en si la volatilidad de entrada es realizada o condicional GARCH.
  */
 
 import { REGIME_COLORS } from "../theme";
@@ -35,7 +42,7 @@ export function RiskSummaryTable({ filas, activeAsset, onSelectAsset }: RiskSumm
           <tr>
             <th>Moneda</th>
             <th>Vol. realizada</th>
-            <th>Régimen</th>
+            <th>Régimen (vol. realizada)</th>
             <th>VaR 95% actual</th>
           </tr>
         </thead>
