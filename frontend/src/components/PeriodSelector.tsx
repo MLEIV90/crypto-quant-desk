@@ -36,6 +36,23 @@ export type PeriodKey = "1W" | "1M" | "3M" | "6M" | "1A" | "3A" | "todo";
 // acotar el período a mano si prefiere una ventana más corta.
 export const DEFAULT_PERIOD: PeriodKey = "todo";
 
+// Fase 33 (PARTE B, verificación de rendimiento): "todo" es liviano en el
+// intervalo DIARIO, que es el que arranca por defecto en `App.tsx`
+// (`DEFAULT_INTERVAL = "1d"`) — medido contra el snapshot real: BTC (el
+// más largo, con la serie fusionada de Fase 31) son ~5.885 velas / ~750KB
+// en `/api/ohlcv` y ~1.05MB en `/api/studies`; el resto del universo son
+// menos (2.200-3.200 velas). Nada de eso satura el navegador ni tarda
+// perceptiblemente. La combinación realmente pesada es "todo" + intervalo
+// HORARIO (~58.000 velas, ~6.7MB en `/api/ohlcv` y ~19.6MB en
+// `/api/studies`) — pero esa combinación NO es la que arranca por
+// defecto (el usuario tiene que cambiar el timeframe a mano) y ya
+// preexistía antes de esta fase; `../downsample.ts` + `Chart.tsx` la
+// mitigan del lado del RENDERIZADO (nunca dibuja más de ~6.000 puntos),
+// aunque no reduce el peso de la descarga en sí. Por eso "todo" se dejó
+// como default en las 4 vistas que lo comparten (Técnico, Comparación,
+// Arbitraje, Correlación) sin necesidad de un default más chico para
+// ninguna: el caso que de verdad pesa no es el que se activa solo.
+
 const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
   { key: "1W", label: "1W" },
   { key: "1M", label: "1M" },

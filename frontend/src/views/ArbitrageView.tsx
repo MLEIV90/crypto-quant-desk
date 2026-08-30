@@ -47,6 +47,7 @@ import {
   ARBITRAGE_PAIR_BACKTEST_FLAT_PERIODS_NOTE,
   ARBITRAGE_PAIR_BACKTEST_HELP,
   ARBITRAGE_PAIR_BACKTEST_NOT_OPERABLE_WARNING,
+  ARBITRAGE_PAIR_BACKTEST_TOTAL_RETURN_HELP,
   ARBITRAGE_PURPOSE_HEADER,
   ARBITRAGE_RATIO_HELP,
   ARBITRAGE_SCATTER_HELP,
@@ -56,6 +57,7 @@ import {
   ARBITRAGE_STABILITY_THRESHOLD_ONE_LINER,
   ARBITRAGE_ZSCORE_EXTREMES_HELP,
   ARBITRAGE_ZSCORE_ZONES_HELP,
+  BACKTEST_METRIC_HELP,
 } from "../helpTexts";
 import { COLORS } from "../theme";
 
@@ -838,21 +840,29 @@ export function ArbitrageView({ assets, interval }: ArbitrageViewProps) {
               label="Retorno total"
               value={formatScaledPercent(detail.backtest.metrics.total_return)}
               valueColor={detail.backtest.metrics.total_return >= 0 ? COLORS.success : COLORS.danger}
+              help={ARBITRAGE_PAIR_BACKTEST_TOTAL_RETURN_HELP}
             />
             <MetricCard
               label="Sharpe"
               value={detail.backtest.metrics.sharpe.toFixed(2)}
               valueColor={detail.backtest.metrics.sharpe >= 0 ? COLORS.success : COLORS.danger}
+              help={BACKTEST_METRIC_HELP.sharpe}
             />
             <MetricCard
               label="Máximo drawdown"
               value={formatScaledPercent(detail.backtest.metrics.max_drawdown)}
               valueColor={COLORS.danger}
+              help={BACKTEST_METRIC_HELP.max_drawdown}
             />
-            <MetricCard label="Cantidad de operaciones" value={detail.backtest.metrics.n_trades} />
+            <MetricCard
+              label="Cantidad de operaciones"
+              value={detail.backtest.metrics.n_trades}
+              help={BACKTEST_METRIC_HELP.n_trades}
+            />
             <MetricCard
               label="% tiempo fuera del mercado"
               value={`${(detail.backtest.metrics.pct_tiempo_fuera * 100).toFixed(1)}%`}
+              help={BACKTEST_METRIC_HELP.pct_tiempo_fuera}
             />
           </div>
           <LineChartPanel series={backtestEquitySeries} height={280} />

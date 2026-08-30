@@ -37,6 +37,7 @@ import { StatusMessage } from "../components/StatusMessage";
 import {
   CORRELATION_DIVERSIFICATION_INDEX_HELP,
   CORRELATION_DIVERSIFICATION_INTRO,
+  CORRELATION_EXTREME_PAIR_HELP,
   CORRELATION_INTRO_HELP,
   CORRELATION_ROLLING_HELP,
   CORRELATION_VS_HISTORICAL_HELP,
@@ -220,10 +221,12 @@ export function CorrelationView({ assets, interval }: CorrelationViewProps) {
               <MetricCard
                 label="Par más correlacionado"
                 value={`${extremes.max.a}-${extremes.max.b} (${formatCorr(extremes.max.valor)})`}
+                help={CORRELATION_EXTREME_PAIR_HELP.max}
               />
               <MetricCard
                 label="Par menos correlacionado"
                 value={`${extremes.min.a}-${extremes.min.b} (${formatCorr(extremes.min.valor)})`}
+                help={CORRELATION_EXTREME_PAIR_HELP.min}
               />
               <MetricCard
                 label="Diversificación del universo"

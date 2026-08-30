@@ -26,6 +26,7 @@ import {
   RESEARCH_RL_APPROACH_HELP,
   RESEARCH_RL_TABLE_HELP,
   RESEARCH_ROTATION_APPROACH_HELP,
+  RESEARCH_ROTATION_METRIC_HELP,
   RESEARCH_ROTATION_TABLE_HELP,
   RESEARCH_SYNTHESIS_TEXT,
   RESEARCH_THESIS_TEXT,
@@ -137,11 +138,13 @@ function RotationApproachCard({ rotation }: { rotation: RotationResearchResult |
           label="Pares robustos"
           value={`${rotation.conclusion.pares_robustos.length} de ${pares.length}`}
           subtext={`${(rotation.conclusion.fraccion_pares_robustos * 100).toFixed(0)}% — consistente con azar`}
+          help={RESEARCH_ROTATION_METRIC_HELP.pares_robustos}
         />
         <MetricCard
           label={`Par principal (${rotation.conclusion.par_principal})`}
           value={rotation.conclusion.robusto_par_principal ? "Robusto" : "No robusto"}
           valueColor={rotation.conclusion.robusto_par_principal ? undefined : COLORS.danger}
+          help={RESEARCH_ROTATION_METRIC_HELP.par_principal}
         />
       </div>
       <p className="backtest-strategy-card__tradeoff">
@@ -268,15 +271,18 @@ export function ResearchView({ asset }: ResearchViewProps) {
               label="¿Supera azar?"
               value={prediction.supera_azar ? "SÍ" : "NO"}
               valueColor={prediction.supera_azar ? undefined : COLORS.danger}
+              help={RESEARCH_METRIC_HELP.supera_azar}
             />
             <MetricCard
               label="¿Supera mayoritaria?"
               value={prediction.supera_mayoritaria ? "SÍ" : "NO"}
               valueColor={prediction.supera_mayoritaria ? undefined : COLORS.danger}
+              help={RESEARCH_METRIC_HELP.supera_mayoritaria}
             />
             <MetricCard
               label="On-chain usado"
               value={prediction.used_onchain ? `SÍ (${prediction.onchain_columns.length} cols.)` : "NO"}
+              help={RESEARCH_METRIC_HELP.used_onchain}
             />
           </div>
 

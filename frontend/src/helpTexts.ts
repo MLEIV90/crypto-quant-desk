@@ -426,6 +426,21 @@ export const CORRELATION_DIVERSIFICATION_INTRO =
   "(vol targeting, ver la pestaña Riesgo) importa más que la ilusión de diversificar entre criptoactivos " +
   "que, en la práctica, se mueven juntos la mayor parte del tiempo.";
 
+// Fase 33 (hallazgo A5-04): las tarjetas de par más/menos correlacionado
+// mostraban el número sin explicar de dónde sale ni qué significa el
+// extremo — el heatmap de arriba ya lo resalta visualmente (Fase 29), pero
+// la tarjeta en sí no tenía tooltip propio.
+export const CORRELATION_EXTREME_PAIR_HELP = {
+  max:
+    "El par con la correlación de Pearson (o Spearman, según el método elegido arriba) MÁS ALTA de toda la " +
+    "matriz sobre el período seleccionado — resaltado también con un borde en el heatmap. Correlación alta " +
+    "significa poca diversificación entre esas dos monedas: cuando una cae, la otra suele acompañarla.",
+  min:
+    "El par con la correlación MÁS BAJA de toda la matriz sobre el período seleccionado — resaltado con un " +
+    "borde distinto en el heatmap. Es el par que más se acerca a moverse de forma independiente dentro de " +
+    "este universo, aunque siga siendo positiva (ver el texto de diversificación de abajo).",
+};
+
 export const CORRELATION_DIVERSIFICATION_INDEX_HELP =
   "1 menos la correlación promedio entre todos los pares de la matriz (excluyendo la diagonal, que " +
   "siempre es 1). Un número cercano a 0 indica que el universo se mueve casi como un solo activo — poca " +
@@ -583,6 +598,18 @@ export const ARBITRAGE_LONG_ONLY_HELP =
   "en corto, pero deja de ser dollar-neutral: el resultado ahora también depende de si el mercado en general " +
   "sube o baja, no solo de si el spread revierte.";
 
+// Fase 33 (hallazgo A5-04): las métricas del backtest del par no tenían
+// tooltip propio — a diferencia de BacktestView.tsx (que reutiliza
+// BACKTEST_METRIC_HELP por fila de tabla), acá van sobre MetricCard
+// individuales. "Retorno total" es específico de este backtest (no
+// anualizado, a diferencia del CAGR que sí muestra BacktestView) — el
+// resto reutiliza BACKTEST_METRIC_HELP tal cual (mismos campos, mismo
+// significado: sharpe/max_drawdown/n_trades/pct_tiempo_fuera).
+export const ARBITRAGE_PAIR_BACKTEST_TOTAL_RETURN_HELP =
+  "Retorno acumulado del backtest de punta a punta de todo el período, ya neto de costos de transacción — NO " +
+  "anualizado (un período más largo o más corto da un número directamente comparable en magnitud, no una tasa " +
+  "por año). Para una medida ajustada por riesgo, mirá el Sharpe al lado.";
+
 // --------------------------------------------------------------------------
 // Vista "Research" (Fase 8c, rehecha en Fase 24) — /api/prediction (ML
 // supervisado, on-demand) y /api/research-experiments (RL y rotación,
@@ -647,4 +674,19 @@ export const RESEARCH_METRIC_HELP: Record<string, string> = {
   baseline_azar: "Accuracy esperada de un clasificador que elige al azar entre las clases, respetando su frecuencia real (no necesariamente 33% exacto si las clases están desbalanceadas). La vara más baja que cualquier modelo debería superar.",
   baseline_mayoritaria: "Accuracy de predecir SIEMPRE la clase más frecuente del período, sin mirar ningún dato de entrada. Una vara más exigente que el azar puro, y la que más modelos de ML mal evaluados no logran superar.",
   roc_auc_media: "Área bajo la curva ROC (one-vs-rest, promediada entre clases): qué tan bien el modelo separa una clase de las demás en TODOS los umbrales posibles, no solo en el que se usó para decidir. 0.5 = azar, 1.0 = separación perfecta; 0.53 está prácticamente en 0.5.",
+  // Fase 33 (hallazgo A5-04): faltaban estas 3 — el veredicto SÍ/NO de cada
+  // comparación necesita el mismo criterio explícito que ya tienen las
+  // métricas numéricas de arriba, no solo el resultado binario.
+  supera_azar: "SÍ si 'Accuracy purgeada' es mayor que 'Baseline azar' — la vara más baja que cualquier modelo debería superar. NO acá es la señal más fuerte de que el modelo no tiene ningún poder predictivo real.",
+  supera_mayoritaria: "SÍ si 'Accuracy purgeada' es mayor que 'Baseline mayoritaria' (predecir siempre la clase más frecuente, sin mirar ningún dato). Una vara más exigente que el azar — muchos modelos de ML mal evaluados no la superan.",
+  used_onchain: "Si el modelo tuvo disponibles features on-chain (flujos a exchanges, direcciones activas, MVRV, etc. — ver la pestaña de datos on-chain) además de las técnicas derivadas del precio. No todas las monedas del universo tienen cobertura on-chain (ver `data/onchain.py`).",
+};
+
+// Fase 33 (hallazgo A5-04): el experimento de rotación (RotationApproachCard)
+// mostraba "Pares robustos" y "Par principal" sin tooltip propio — el
+// texto de RESEARCH_ROTATION_TABLE_HELP de abajo ya explica el criterio de
+// robustez, pero no estaba enganchado a ninguna de las dos tarjetas.
+export const RESEARCH_ROTATION_METRIC_HELP: Record<string, string> = {
+  pares_robustos: "Cuántos de los pares evaluados mantuvieron un resultado consistente con edge real (no explicable por azar) en la grilla de validación cruzada de lookback × frecuencia de rebalanceo — ver el detalle abajo.",
+  par_principal: "El par con más combinaciones de parámetros ganadoras en la grilla — si NI SIQUIERA el mejor candidato es robusto, ningún otro par del experimento lo es.",
 };

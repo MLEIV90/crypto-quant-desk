@@ -169,13 +169,22 @@ export function StatisticsView({ asset, interval }: StatisticsViewProps) {
               <InfoTooltip text={STATIONARITY_HELP} />
             </h3>
             <div className="metric-grid">
-              <MetricCard label="Precio: ¿estacionario?" value={stats.adf_precio.es_estacionaria ? "Sí" : "No"} />
-              <MetricCard label="Precio: p-valor" value={stats.adf_precio.p_valor.toFixed(4)} />
+              <MetricCard
+                label="Precio: ¿estacionario?"
+                value={stats.adf_precio.es_estacionaria ? "Sí" : "No"}
+                help={STATIONARITY_HELP}
+              />
+              <MetricCard label="Precio: p-valor" value={stats.adf_precio.p_valor.toFixed(4)} help={STATIONARITY_HELP} />
               <MetricCard
                 label="Retornos: ¿estacionarios?"
                 value={stats.adf_retornos.es_estacionaria ? "Sí" : "No"}
+                help={STATIONARITY_HELP}
               />
-              <MetricCard label="Retornos: p-valor" value={stats.adf_retornos.p_valor.toFixed(4)} />
+              <MetricCard
+                label="Retornos: p-valor"
+                value={stats.adf_retornos.p_valor.toFixed(4)}
+                help={STATIONARITY_HELP}
+              />
             </div>
             <p className="view-note">
               En criollo: acá el precio de {asset} {stats.adf_precio.es_estacionaria ? "SÍ" : "NO"} es
